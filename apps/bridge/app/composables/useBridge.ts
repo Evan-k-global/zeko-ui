@@ -1,22 +1,28 @@
-import { useMutation } from "@urql/vue"
-import { AccountUpdate, Mina, type PublicKey, Reducer, fetchAccount } from "o1js"
-import { client } from "~~/graphql"
-import {
-	GetTransferAccountUpdateQuery,
-	ProveTransferClaimMutation,
-	ProveTransferRequestMutation
-} from "~~/graphql/sequencer"
+import { type Client, useMutation } from "@urql/vue"
 import {
 	type After,
+	GetTransferAccountUpdateQuery,
+	ProveTransferClaimMutation,
+	ProveTransferRequestMutation,
 	type Transfer,
 	applyAccountUpdates,
 	fetchTransfersExtension,
 	findTransfer,
 	innerBridgePublicKey,
-	sendTransaction
-} from "~~/helpers/transfer"
+	sendTransaction,
+	urls
+} from "@zeko/sdk"
+import { createMinaClient } from "@zeko/sdk/vue"
+import { AccountUpdate, Mina, type PublicKey, Reducer, fetchAccount } from "o1js"
 
-const pollForTransferAccountUpdate = async (key: string, delay = 5000) => {
+// const getMinaClient = () => createMinaClient(urls["mina:testnet"])
+const getZekoClient = () => createMinaClient(urls["zeko:testnet"])
+
+const pollForTransferAccountUpdate = async ({
+	client,
+	key,
+	delay = 5000
+}: { client: Client; key: string; delay?: number }) => {
 	console.log("Polling GetTransfer ...")
 	const result = await client
 		.query(GetTransferAccountUpdateQuery, { key }, { requestPolicy: "network-only" })
@@ -25,7 +31,7 @@ const pollForTransferAccountUpdate = async (key: string, delay = 5000) => {
 	if (result.data?.transferAccountUpdate) return result.data.transferAccountUpdate
 	//Wait 5s and try again
 	await new Promise((resolve) => setTimeout(resolve, delay))
-	return pollForTransferAccountUpdate(key)
+	return pollForTransferAccountUpdate({ client, key })
 }
 
 export function useBridge() {
@@ -53,11 +59,10 @@ export function useBridge() {
 
 		if (proveTransferResult.error) throw proveTransferResult.error
 		const key = proveTransferResult.data?.proveTransferRequest.accountUpdateKey
-		console.log({ key })
 		if (!key) throw new Error("Prove transfer failed")
-
+		const client = getZekoClient()
 		// Poll for transfer account update
-		const transferAccountUpdate = await pollForTransferAccountUpdate(key)
+		const transferAccountUpdate = await pollForTransferAccountUpdate({ key, client })
 		return transferAccountUpdate
 	}
 
@@ -171,7 +176,8 @@ export function useBridge() {
 		console.log({ key })
 		if (!key) throw new Error("Prove transfer Claim failed")
 		// Poll for transfer account update
-		const transferAccountUpdate = await pollForTransferAccountUpdate(key)
+		const client = getZekoClient()
+		const transferAccountUpdate = await pollForTransferAccountUpdate({ client, key })
 		return transferAccountUpdate
 	}
 

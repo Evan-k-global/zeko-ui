@@ -1,11 +1,11 @@
 import { useMutation } from "@urql/vue"
 import { AccountUpdate, Mina, type PublicKey, Reducer, fetchAccount } from "o1js"
-import { client } from "~/graphql"
+import { client } from "~~/graphql"
 import {
 	GetTransferAccountUpdateQuery,
 	ProveTransferClaimMutation,
 	ProveTransferRequestMutation
-} from "~/graphql/sequencer"
+} from "~~/graphql/sequencer"
 import {
 	type After,
 	type Transfer,
@@ -14,7 +14,7 @@ import {
 	findTransfer,
 	innerBridgePublicKey,
 	sendTransaction
-} from "~/helpers/transfer"
+} from "~~/helpers/transfer"
 
 const pollForTransferAccountUpdate = async (key: string, delay = 5000) => {
 	console.log("Polling GetTransfer ...")

@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid"
-import { type ActorRefFromLogic, assign, fromPromise, sendTo, setup } from "xstate"
+import { type ActorRefFromLogic, assign, setup } from "xstate"
 import { bridgeOperationMachine } from "./bridgeOperation"
 import type { Networks, walletMachine } from "./wallet"
 

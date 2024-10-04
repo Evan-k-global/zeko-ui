@@ -1,8 +1,8 @@
 <script lang="ts" setup>
 import { fromPromise } from "xstate"
 import { useMachine, useSelector } from "~/composables/useXstate"
-import { bridgeMachine } from "~/machines/bridge"
-import { bridgeOperationMachine } from "../machines/bridgeOperation"
+import { bridgeMachine } from "~~/machines/bridge"
+import { bridgeOperationMachine } from "~~/machines/bridgeOperation"
 
 const walletStore = useWalletStore()
 const { getPublicKey } = walletStore
@@ -30,11 +30,11 @@ const amountToBridge = ref("")
 const walletValue = computed(() => walletSnapshot.value.value)
 const totalBalances = computed(() => {
 	// show(walletSnapshot.value.value)
-	// if (walletSnapshot.value.value) {
-	return `MINA: (L1) => ${minaBalances.value.get("mina")} | L2 => ${zekoBalances.value.get("mina")}`
-	// }
-	// return ""
+	return `MINA: (L1) => ${minaBalances.value.MINA} | L2 => ${zekoBalances.value.MINA}`
 })
+// const totalBalances = useSelector(walletActorRef, (state) => {
+// 	return `MINA: (L1) => ${state.context.minaBalances.MINA} | L2 => ${state.context.zekoBalances.MINA}`
+// })
 
 // const totalBalances = computed(
 // 	() =>

@@ -7,7 +7,7 @@ import {
 	sendTo,
 	setup
 } from "xstate"
-import type { After, Direction, Transfer } from "~/helpers/transfer"
+import type { After, Direction, Transfer } from "~~/helpers/transfer"
 import type { walletMachine } from "./wallet"
 const wait = (ms = 1000) => new Promise((res) => setTimeout(res, ms))
 

@@ -1,6 +1,4 @@
-import { defineNuxtPlugin } from "#app"
-
-const plugin = defineNuxtPlugin({
+export default defineNuxtPlugin({
 	name: "simple-store",
 	setup(nuxtApp) {
 		// biome-ignore lint/suspicious/noExplicitAny: <explanation>
@@ -17,5 +15,3 @@ const plugin = defineNuxtPlugin({
 		}
 	}
 })
-
-export default plugin

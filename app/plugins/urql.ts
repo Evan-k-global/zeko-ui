@@ -1,5 +1,5 @@
 import urql from "@urql/vue"
-import { clientOptions } from "~/graphql"
+import { clientOptions } from "~~/graphql"
 
 export default defineNuxtPlugin({
 	name: "urql",

@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { ActorRefFromLogic } from "xstate"
 import { useSelector } from "~/composables/useXstate"
-import type { bridgeOperationMachine } from "~/machines/bridgeOperation"
+import type { bridgeOperationMachine } from "~~/machines/bridgeOperation"
 
 const { operation } = defineProps<{
 	operation: ActorRefFromLogic<typeof bridgeOperationMachine>

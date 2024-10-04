@@ -181,7 +181,9 @@ export const bridgeOperationMachine = setup({
 					{
 						target: "CONFIRMING_TRANSFER_REQUEST",
 						description: "Must be started on the source network.",
-						actions: assign({ requestAccountUpdates: ({ event }) => event.output }),
+						actions: assign({
+							requestAccountUpdates: ({ event }) => event.output
+						}),
 						guard: "currentNetworkIsSource"
 					},
 					{
@@ -199,7 +201,9 @@ export const bridgeOperationMachine = setup({
 		CONFIRMING_TRANSFER_REQUEST: {
 			invoke: {
 				src: "confirmTransferRequest",
-				input: ({ context }) => ({ accountUpdates: context.requestAccountUpdates }),
+				input: ({ context }) => ({
+					accountUpdates: context.requestAccountUpdates
+				}),
 				onDone: [
 					{
 						target: "FINDING_ALL_TRANSFERS",
@@ -259,7 +263,10 @@ export const bridgeOperationMachine = setup({
 				onDone: {
 					target: "PROVING_TRANSFER_CLAIM",
 					actions: assign(({ context, event }) => ({
-						claimParameters: { ...context.claimParameters, after: event.output.after }
+						claimParameters: {
+							...context.claimParameters,
+							after: event.output.after
+						}
 					}))
 				}
 			}
@@ -276,7 +283,9 @@ export const bridgeOperationMachine = setup({
 					{
 						target: "CONFIRMING_TRANSFER_CLAIM",
 						description: "Must be started on the destination network.",
-						actions: assign({ claimAccountUpdates: ({ event }) => event.output }),
+						actions: assign({
+							claimAccountUpdates: ({ event }) => event.output
+						}),
 						guard: "currentNetworkIsDestination"
 					},
 					{
@@ -294,10 +303,15 @@ export const bridgeOperationMachine = setup({
 		CONFIRMING_TRANSFER_CLAIM: {
 			invoke: {
 				src: "confirmTransferClaim",
-				input: ({ context: { claimAccountUpdates } }) => ({ accountUpdates: claimAccountUpdates }),
+				input: ({ context: { claimAccountUpdates } }) => ({
+					accountUpdates: claimAccountUpdates
+				}),
 				onDone: {
 					target: "BRIDGE_OPERATION_DONE",
-					actions: assign(({ event }) => ({ accountUpdates: "", claimHash: event.output }))
+					actions: assign(({ event }) => ({
+						accountUpdates: "",
+						claimHash: event.output
+					}))
 				}
 			}
 		},

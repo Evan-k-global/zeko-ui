@@ -1,6 +1,5 @@
-import { walletMachine } from "@zeko/sdk/vue"
+import { useSelector, useWallet } from "@zeko/sdk/vue"
 import { PublicKey } from "o1js"
-import { useMachine } from "~/composables/useXstate"
 import { createSimpleStore } from "~~/helpers/store"
 
 const getPublicKey = (address: string) => {
@@ -8,7 +7,7 @@ const getPublicKey = (address: string) => {
 }
 
 export const useWalletStore = createSimpleStore("wallet", () => {
-	const { send, snapshot, actorRef } = useMachine(walletMachine, {
+	const { send, snapshot, actorRef } = useWallet({
 		inspect: (event) => {
 			if (event.type === "@xstate.event") {
 				console.log(event)

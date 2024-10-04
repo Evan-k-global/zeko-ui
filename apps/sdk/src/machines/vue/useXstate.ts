@@ -1,19 +1,21 @@
-import { type Ref, isRef, shallowRef } from "vue"
+import { type Ref, isRef, onBeforeUnmount, shallowRef } from "vue"
 import type {
 	Actor,
 	ActorOptions,
+	AnyActorLogic,
 	AnyActorRef,
 	AnyStateMachine,
 	ConditionalRequired,
 	EventFromLogic,
+	IsNotNever,
+	Observer,
 	RequiredActorOptionsKeys,
-	SnapshotFrom
+	Snapshot,
+	SnapshotFrom,
+	Subscription
 } from "xstate"
 
-import type { AnyActorLogic, IsNotNever, Snapshot } from "xstate"
-
-import { onBeforeUnmount } from "vue"
-import { type Observer, type Subscription, createActor, toObserver } from "xstate"
+import { createActor, toObserver } from "xstate"
 
 export function useActorRef<TLogic extends AnyActorLogic>(
 	actorLogic: TLogic,
@@ -129,7 +131,7 @@ export function useActor<TLogic extends AnyActorLogic>(
 	actorRef: Actor<TLogic>
 }
 export function useActor(actorLogic: AnyActorLogic, options: ActorOptions<AnyActorLogic> = {}) {
-	if (import.meta.dev && "send" in actorLogic && typeof actorLogic.send === "function") {
+	if ("send" in actorLogic && typeof actorLogic.send === "function") {
 		throw new Error(
 			`useActor() expects actor logic (e.g. a machine), but received an ActorRef. Use the useSelector(actorRef, ...) hook instead to read the ActorRef's snapshot.`
 		)

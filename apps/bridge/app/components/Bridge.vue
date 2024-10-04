@@ -1,6 +1,6 @@
 <script lang="ts" setup>
+import { useMachine, useSelector } from "@zeko/sdk/vue"
 import { fromPromise } from "xstate"
-import { useMachine, useSelector } from "~/composables/useXstate"
 import { bridgeMachine } from "~~/machines/bridge"
 import { bridgeOperationMachine } from "~~/machines/bridgeOperation"
 

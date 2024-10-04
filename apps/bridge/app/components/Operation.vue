@@ -1,6 +1,6 @@
 <script lang="ts" setup>
+import { useSelector } from "@zeko/sdk/vue"
 import type { ActorRefFromLogic } from "xstate"
-import { useSelector } from "~/composables/useXstate"
 import type { bridgeOperationMachine } from "~~/machines/bridgeOperation"
 
 const { operation } = defineProps<{

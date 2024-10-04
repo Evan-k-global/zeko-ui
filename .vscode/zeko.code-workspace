@@ -1,0 +1,20 @@
+{
+    "folders": [
+      {
+        "path": "../apps/bridge",
+      },
+      {
+        "path": "../apps/dex",
+      },
+      {
+        "path": "../apps/sdk",
+      },
+      {
+        "path": "..",
+      },
+    ],
+    "settings": {
+      "typescript.tsdk": "node_modules/typescript/lib"
+    },
+  }
+  

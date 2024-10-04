@@ -1,4 +1,4 @@
-import { graphql } from "."
+import { graphql } from "./helpers"
 
 export const ProveTransferRequestMutation = graphql(`
   mutation ProveTransferRequest($transferRequestInput: TransferRequestInput!) {

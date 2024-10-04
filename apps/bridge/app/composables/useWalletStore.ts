@@ -1,7 +1,7 @@
+import { walletMachine } from "@zeko/sdk/vue"
 import { PublicKey } from "o1js"
 import { useMachine } from "~/composables/useXstate"
 import { createSimpleStore } from "~~/helpers/store"
-import { walletMachine } from "~~/machines/wallet"
 
 const getPublicKey = (address: string) => {
 	return PublicKey.fromBase58(address)

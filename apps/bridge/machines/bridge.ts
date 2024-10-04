@@ -1,7 +1,8 @@
+import type { Networks } from "@zeko/sdk"
+import type { walletMachine } from "@zeko/sdk/vue"
 import { nanoid } from "nanoid"
 import { type ActorRefFromLogic, assign, setup } from "xstate"
 import { bridgeOperationMachine } from "./bridgeOperation"
-import type { Networks, walletMachine } from "./wallet"
 
 const wait = (ms = 1000) => new Promise((res) => setTimeout(res, ms))
 type Network = "mina" | "zeko"
@@ -91,7 +92,9 @@ export const bridgeMachine = setup({
 					actions: [
 						{
 							type: "changeOperationNetwork",
-							params: ({ event }) => ({ network: event.network.includes("mina") ? "mina" : "zeko" })
+							params: ({ event }) => ({
+								network: event.network.includes("mina") ? "mina" : "zeko"
+							})
 						},
 						assign({ currentNetwork: ({ event }) => event.network })
 					]
@@ -109,7 +112,10 @@ export const bridgeMachine = setup({
 					}
 				},
 				OperationComplete: {
-					actions: { type: "completeOperation", params: ({ event }) => ({ id: event.id }) }
+					actions: {
+						type: "completeOperation",
+						params: ({ event }) => ({ id: event.id })
+					}
 				}
 			}
 		}

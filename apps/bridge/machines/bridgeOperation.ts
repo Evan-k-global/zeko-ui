@@ -1,3 +1,5 @@
+import type { After, Direction, Transfer } from "@zeko/sdk"
+import type { walletMachine } from "@zeko/sdk/vue"
 import {
 	type ActorRefFromLogic,
 	type AnyActorRef,
@@ -7,8 +9,6 @@ import {
 	sendTo,
 	setup
 } from "xstate"
-import type { After, Direction, Transfer } from "~~/helpers/transfer"
-import type { walletMachine } from "./wallet"
 const wait = (ms = 1000) => new Promise((res) => setTimeout(res, ms))
 
 type Network = "mina" | "zeko"

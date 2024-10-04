@@ -1,30 +1,30 @@
 <script lang="ts" setup>
-const {
-  isConnected,
-  connectWallet,
-  display,
-  currentNetwork,
-  disconnectWallet,
-  switchNetwork,
-} = useWallet();
-
-const zekoTestnet = async () => {
-  await switchNetwork("zeko:testnet");
-};
-const minaTestnet = async () => {
-  await switchNetwork("mina:testnet");
-};
-onMounted(async () => {
-  await connectWallet();
-});
+const store = useWalletStore()
+const { send } = store
+const { address, displayAddress, snapshot, minaBalances, actorRef } =
+	toRefs(store)
 </script>
 
 <template>
-  <div>Wallet Connect</div>
-  <div>{{ display }} | {{ currentNetwork }}</div>
-  <button @click="">Testnet</button>
-  <button @click="" disabled>Live</button>
+  <h2>Wallet</h2>
   <hr />
-  <button @click="connectWallet" :disabled="isConnected">Connect</button>
-  <button @click="disconnectWallet" :disabled="!isConnected">Disconnect</button>
+  {{ snapshot.value }}
+  {{ snapshot.context }}
+  <p>
+    {{ address }} {{ displayAddress }} | {{ snapshot.context.currentNetwork }}
+  </p>
+  <fieldset>
+    <label>
+      <input name="testnet" type="checkbox" role="switch" checked disabled />
+      Testnet
+    </label>
+  </fieldset>
+  {{ actorRef }}
+  {{ minaBalances }}
+  <!-- <hr /> -->
+  <div v-if='snapshot.matches("INIT")' role="group">
+    <button @click='send({ type: "Connect" })'>
+      Connect
+    </button>
+  </div>
 </template>

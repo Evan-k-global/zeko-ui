@@ -1,5 +1,7 @@
 {
-	"name": "zeko-ui",
+	"$schema": "https://unpkg.com/wrangler@latest/config-schema.json",
+	"name": "website",
+	"account_id": "a12d2915bc16ee8550f19399839623f7",
 	"compatibility_date": "2025-01-16",
 	"main": "./.output/server/index.mjs",
 	"assets": {

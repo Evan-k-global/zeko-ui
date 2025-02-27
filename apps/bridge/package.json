@@ -6,6 +6,7 @@
 		"format": "dprint fmt --verbose",
 		"build": "nuxt build",
 		"build:cf": "NITRO_PRESET=cloudflare_module nuxt build",
+		"build:netlify": "NITRO_PRESET=netlify_edge nuxt build",
 		"deploy": "wrangler deploy",
 		"dev:cf": "wrangler dev .output/server/index.mjs --assets .output/public/",
 		"deploy:dev": "rimraf .output .wrangler .nuxt && NITRO_PRESET=cloudflare_module nuxt build && wrangler deploy",

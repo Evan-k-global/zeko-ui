@@ -37,7 +37,7 @@ main {
     "rings"
     "footer";
   position: relative;
-  min-height: 100dvh;
+  min-height: 100svh;
   width: 100vw;
   color: var(--colors-gray-950);
   font-size: var(--fonts-lexend-typescale-scale-m);
@@ -46,36 +46,44 @@ main {
 header {
   grid-area: nav;
   width: 100vw;
+  height: 15svh;
 }
 .Hero {
   grid-area: hero;
-  min-height: 100dvh;
+  min-height: 85svh;
   width: 100vw;
 }
 .ProblemSolution {
   grid-area: first;
   background-color: var(--colors-gray-950);
   color: white;
-  min-height: 40rem;
-  height: 100dvh;
   width: 100vw;
+  max-height: 100svh;
+  aspect-ratio: 16/9;
+}
+
+@media (max-width: 1024px) {
+  .ProblemSolution {
+    height: 85svh;
+  }
 }
 .Feature {
   grid-area: second;
-  height: 22.125rem;
   width: 100vw;
 }
+
 .Feature2 {
   grid-area: third;
   color: white;
-  height: 30rem;
   width: 100vw;
 }
+
 .Rings {
   grid-area: rings;
   width: 100vw;
-  height: 60rem;
+  min-height: fit-content;
 }
+
 footer {
   grid-area: footer;
   width: 100vw;

@@ -101,16 +101,27 @@ const communityItems = [
 }
 
 .Sound, :deep(.Sound) {
-  width: 40px;
-  height: 40px;
+  --transition: transform 0.1s ease-in-out;
+  width: 2rem;
+  height: 2rem;
   background-color: black;
   border-radius: 50%;
   display: grid;
   place-items: center;
+  transition: var(--transition);
+  &:hover {
+    background-color: var(--colors-cosmicGold-100);
+    transform: scale(1.1);
+    transition: var(--transition);
+  }
   button, :deep(button) {
     background: none;
     border: none;
     cursor: pointer;
+  }
+  svg, :deep(svg) {
+    width: 85%;
+    height: 85%;
   }
 }
 </style>

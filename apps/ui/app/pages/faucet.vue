@@ -7,6 +7,7 @@ import { ArrowBigRight } from "lucide-vue-next"
 import { assign, fromPromise, setup } from "xstate"
 const minaAddress = defineModel()
 
+const id = useId()
 const faucetMachine = setup({
 	types: {
 		events: {} as { type: "SUBMIT" }
@@ -89,7 +90,7 @@ const submitDisabled = computed(
           href="https://faucet.minaprotocol.com">https://faucet.minaprotocol.com</a>
       </span>
       <div class="Form">
-        <Field.Root>
+        <Field.Root :id>
           <Field.Label>MINA Address</Field.Label>
           <div class="InputWrapper">
             <SvgMinaToken width="24" height="24" />

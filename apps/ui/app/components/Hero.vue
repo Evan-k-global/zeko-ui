@@ -132,7 +132,7 @@
     align-items: center;
     gap: 1rem;
     button {
-      width: 15ch;
+      width: 17ch;
     }
   }
 }

@@ -202,7 +202,7 @@ export const theme = createTheme({
 			cta: {
 				width: "165px",
 				height: "52px",
-				fontSize: fonts.lexend.typescale.scale.l,
+				fontSize: fonts.lexend.typescale.scale.m,
 				fontWeight: fonts.lexend.typescale.weight.medium,
 				radius: "0.5rem",
 				padding: "0.75rem 1rem"

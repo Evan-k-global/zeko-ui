@@ -3,6 +3,7 @@
 	"name": "website",
 	"account_id": "a12d2915bc16ee8550f19399839623f7",
 	"compatibility_date": "2025-01-16",
+	"compatibility_flags": ["nodejs_compat"], //Optional
 	"main": "./.output/server/index.mjs",
 	"assets": {
 		"directory": "./.output/public/",

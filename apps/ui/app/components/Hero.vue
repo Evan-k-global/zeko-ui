@@ -18,8 +18,10 @@
             target="_blank">
             <Button variant="cta1">Start Building</Button>
           </NuxtLink>
-          <NuxtLink to="/faucet">
-            <Button variant="cta1">Testnet Contest</Button>
+          <NuxtLink
+            to="https://www.aurowallet.com/"
+            target="_blank">
+            <Button variant="cta1">Get Wallet</Button>
           </NuxtLink>
         </div>
       </div>

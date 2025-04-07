@@ -19,7 +19,7 @@
             <Button variant="cta1">Start Building</Button>
           </NuxtLink>
           <NuxtLink
-            to="https://www.aurowallet.com/"
+            to="/faucet"
             target="_blank">
             <Button variant="cta1">Get Wallet</Button>
           </NuxtLink>

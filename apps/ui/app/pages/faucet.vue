@@ -2,9 +2,12 @@
 // biome-ignore lint/correctness/noUnusedImports: <explanation>
 import { Field } from "@ark-ui/vue/field"
 import { useActor } from "@lumina-dex/sdk/vue"
+import { type } from "arktype"
 // biome-ignore lint/correctness/noUnusedImports: <explanation>
 import { ArrowBigRight } from "lucide-vue-next"
-import { assign, fromPromise, setup } from "xstate"
+import { assign, enqueueActions, fromPromise, setup } from "xstate"
+import { faucetBody } from "~~/helpers/validation"
+
 const minaAddress = defineModel()
 
 const id = useId()
@@ -21,24 +24,31 @@ const faucetMachine = setup({
 				},
 				body: JSON.stringify({ address: minaAddress.value })
 			})
-			const result = await response.text()
-			if (!response.ok) throw new Error(result)
-			return result
+			const result = await response.json()
+			const data = faucetBody(result)
+			if (data instanceof type.errors || !response.ok)
+				throw new Error(`An error has occurred: ${data.message}`)
+			return data
 		})
 	}
 }).createMachine({
 	id: "faucet",
 	initial: "IDLE",
 	context: {
-		errorMessage: ""
+		errorMessage: "",
+		hash: ""
 	},
 	states: {
 		IDLE: { on: { SUBMIT: "PENDING" } },
 		PENDING: {
+			entry: enqueueActions(({ enqueue }) => {
+				enqueue.assign({ errorMessage: "", hash: "" })
+			}),
 			invoke: {
 				src: "submit",
 				onDone: {
-					target: "SUCCESS"
+					target: "SUCCESS",
+					actions: assign({ hash: ({ event }) => event.output.hash })
 				},
 				onError: {
 					target: "ERROR",
@@ -46,16 +56,8 @@ const faucetMachine = setup({
 				}
 			}
 		},
-		ERROR: {
-			on: {
-				SUBMIT: { target: "PENDING", actions: assign({ errorMessage: "" }) }
-			}
-		},
-		SUCCESS: {
-			on: {
-				SUBMIT: { target: "PENDING" }
-			}
-		}
+		ERROR: { on: { SUBMIT: "PENDING" } },
+		SUCCESS: { on: { SUBMIT: "PENDING" } }
 	}
 })
 const faucet = useActor(faucetMachine)
@@ -63,6 +65,11 @@ const success = computed(() => faucet.snapshot.value.matches("SUCCESS"))
 const error = computed(() => faucet.snapshot.value.matches("ERROR"))
 const pending = computed(() => faucet.snapshot.value.matches("PENDING"))
 const errorMessage = computed(() => faucet.snapshot.value.context.errorMessage)
+const zekoScanLink = computed(
+	() =>
+		`https://zekoscan.io/testnet/tx/${faucet.snapshot.value.context.hash}/txInfo?type=zk-tx`
+)
+
 const submitDisabled = computed(
 	() =>
 		pending.value ||
@@ -109,8 +116,14 @@ const submitDisabled = computed(
       </div>
 
       <div class="Result">
-        <p v-if="success">
+        <p class="success" v-if="success">
           tMINA succesfully requested to <span>{{ minaAddress }}</span>
+          <a
+            :href="zekoScanLink"
+            target="_blank"
+            rel="noopener noreferrer">
+            View on ZekoScan
+          </a>
         </p>
         <p class="error" v-if="error">{{ errorMessage }}</p>
       </div>
@@ -215,6 +228,10 @@ section {
 
 .error {
   color: var(--colors-persianRed-500);
+}
+
+.success {
+  color: var(--colors-complete-content);
 }
 
 .Disclaimer {

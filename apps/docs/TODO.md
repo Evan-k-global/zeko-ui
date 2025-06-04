@@ -1,0 +1,8 @@
+- Remove duplication
+- Add images
+- Add diagrams
+- Add interactivity (glossary etc)
+- Security Model : Need Rewrite
+- Missing:
+  - Circuits
+  - Zeko Blocks?

@@ -31,7 +31,7 @@
 		"arktype": "^2.1.0",
 		"lucide-vue-next": "^0.453.0",
 		"nanoid": "^5.0.9",
-		"nuxt": "^3.16.2",
+		"nuxt": "3.16.2",
 		"o1js": "2.2.0",
 		"pinia": "^2.3.0",
 		"vue": "latest",

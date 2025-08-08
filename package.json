@@ -12,8 +12,13 @@
 		"typescript": "^5.6.2"
 	},
 	"engines": {
-		"node": "22.9.0",
+		"node": "24.5.0",
 		"pnpm": "9.12.0"
 	},
-	"packageManager": "pnpm@9.12.0"
+	"packageManager": "pnpm@9.12.0",
+	"pnpm": {
+		"patchedDependencies": {
+			"@gql.tada/internal": "patches/@gql.tada__internal.patch"
+		}
+	}
 }

@@ -31,6 +31,7 @@ import type {
 import {
 	depositAux,
 	fetchActions,
+	filterNulls,
 	getNextDepositIndex,
 	getNextWithdrawalIndex,
 	withdrawalAux
@@ -150,8 +151,8 @@ export class Bridge {
 		const userOuterActions = await fetchActions(this.l1ArchiveClient, pk)
 		const currentSlot = await this.fetchCurrentSlot()
 
-		return userOuterActions
-			.map(({ action }) => {
+		return filterNulls(
+			userOuterActions.map(({ action }) => {
 				const [
 					recipient1,
 					recipient2,
@@ -194,7 +195,7 @@ export class Bridge {
 					timedOut: timeout.lessThan(currentSlot).toBoolean()
 				}
 			})
-			.filter(Boolean) as Deposit[]
+		)
 	}
 
 	private async fetchOuterActions(actionStates?: Mina.ActionStates): Promise<OuterAction[]> {
@@ -234,8 +235,8 @@ export class Bridge {
 	private async fetchUserWithdrawals(pk: PublicKey): Promise<Withdrawal[]> {
 		const userInnerActions = await fetchActions(this.l2Client, pk)
 
-		return userInnerActions
-			.map(({ action }) => {
+		return filterNulls(
+			userInnerActions.map(({ action }) => {
 				const [recipient1, recipient2, amount1] = action
 
 				if (!recipient1 || !recipient2 || !amount1) return null
@@ -248,7 +249,7 @@ export class Bridge {
 					amount
 				}
 			})
-			.filter(Boolean) as Withdrawal[]
+		)
 	}
 
 	private async fetchInnerActions(actionStates?: Mina.ActionStates): Promise<InnerAction[]> {
@@ -416,13 +417,13 @@ export class Bridge {
 			depositParams,
 			helperAccount,
 			witness: {
-				prevNextDeposit,
+				prevNextDeposit: prevNextDeposit.toString(),
 				checkAccepted: {
 					elems: outerActions
 						.slice(myDepositIndex, nextCommitIndex + 1)
 						.map(({ action }) => ({ actions: action.action.map((a) => a.toString()) })),
 					init: {
-						depositIndex: myDepositIndex,
+						depositIndex: myDepositIndex.toString(),
 						orignalActionState: myDeposit.action.beforeActionState.toString(),
 						params: {
 							amount: depositParams.deposit.amount.toString(),
@@ -435,7 +436,7 @@ export class Bridge {
 				},
 				ase: {
 					stmt: {
-						length: syncedOuterActionState.length.sub(aseElems.length),
+						length: syncedOuterActionState.length.sub(aseElems.length).toString(),
 						actionState: nextCommit.action.afterActionState.toString()
 					},
 					fields: aseElems.map((elem) => elem.toString())
@@ -603,11 +604,11 @@ export class Bridge {
 					recipient: withdrawalParams.withdrawal.recipient.toBase58(),
 					children: "[]"
 				},
-				prevNextWithdrawal,
+				prevNextWithdrawal: prevNextWithdrawal.toString(),
 				withdrawalAse: {
 					fields: withdrawalAse.map((elem) => elem.toString()),
 					stmt: {
-						length: lastCommit.innerActionStateLength.sub(withdrawalAse.length),
+						length: lastCommit.innerActionStateLength.sub(withdrawalAse.length).toString(),
 						actionState: myWithdrawal.action.afterActionState.toString()
 					}
 				},
@@ -677,13 +678,23 @@ export class Bridge {
 			auxesMap.set(aux.toBigInt(), deposit)
 		}
 
+		const helperAccount = await this.fetchAccount(
+			this.l2Client,
+			pk,
+			TokenId.derive(this.innerHolder)
+		)
+		const nextDeposit = helperAccount ? getNextDepositIndex(helperAccount) : UInt32.zero
+
 		const outerActions: (MaybeDeposit | OuterCommit)[] = (await this.fetchOuterActions()).map(
-			(action) => {
+			(action, index) => {
 				if (action.type === "commit") return action
 				if (action.type === "witness") {
+					const deposit = auxesMap.get(action.aux.toBigInt())
 					return {
 						...action,
-						deposit: auxesMap.get(action.aux.toBigInt())
+						deposit: deposit
+							? { ...deposit, finalised: nextDeposit.greaterThan(UInt32.from(index)).toBoolean() }
+							: undefined
 					}
 				}
 				throw new Error("unreachable")
@@ -769,10 +780,27 @@ export class Bridge {
 			auxesMap.set(aux.toBigInt(), withdrawal)
 		}
 
-		const innerActions: MaybeWithdrawal[] = (await this.fetchInnerActions()).map((action) => ({
-			...action,
-			withdrawal: auxesMap.get(action.aux.toBigInt())
-		}))
+		const helperAccount = await this.fetchAccount(
+			this.l1Client,
+			pk,
+			TokenId.derive(this.outerTokenOwner)
+		)
+		const nextWithdrawal = helperAccount ? getNextWithdrawalIndex(helperAccount) : UInt32.zero
+
+		const innerActions: MaybeWithdrawal[] = (await this.fetchInnerActions()).map(
+			(action, index) => {
+				const withdrawal = auxesMap.get(action.aux.toBigInt())
+				return {
+					...action,
+					withdrawal: withdrawal
+						? {
+								...withdrawal,
+								finalised: nextWithdrawal.greaterThan(UInt32.from(index)).toBoolean()
+							}
+						: undefined
+				}
+			}
+		)
 
 		const outerActions = await this.fetchOuterActions()
 		const reversedOuterActions = outerActions.slice().reverse()

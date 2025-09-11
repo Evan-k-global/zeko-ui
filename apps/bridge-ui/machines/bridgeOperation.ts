@@ -1,325 +1,674 @@
-import type { After, Direction, Networks, Transfer } from "@lumina-dex/sdk"
-import type { walletMachine } from "@lumina-dex/sdk"
+import type { Networks, walletMachine } from "@lumina-dex/sdk"
+import { produce } from "immer"
 import {
+	type ActionArgs,
 	type ActorRef,
 	type ActorRefFromLogic,
+	type ErrorActorEvent,
+	type EventObject,
 	type Snapshot,
+	and,
 	assign,
 	enqueueActions,
+	fromCallback,
 	fromPromise,
 	sendTo,
 	setup
 } from "xstate"
-import type { BridgeEvents } from "./bridge"
-const wait = (ms = 1000) => new Promise((res) => setTimeout(res, ms))
+import { finalizeNotification } from "../app/service-worker/notificationList"
+import type { BridgeContext, BridgeEvents } from "./bridge"
+import { createLogger } from "./debug"
+import type { ActionState } from "./operations.worker"
+import { type Result, transactionMachine } from "./transaction"
 
-type SyncedTransfers = { after: After }
-type AllTransfers = { transfer: Transfer; afterAll: After }
-const isDefined = <T>(value: T) => {
-	if (value === undefined) throw new Error("Value is undefined")
-	return value
+const { act, logger, measure } = createLogger("[BRIDGE OPERATION]")
+
+const bridgeParameters = ({ bridge, user, l1, l2 }: BridgeOperationContext) => {
+	return { bridge, user, l1, l2 }
 }
 
-type BridgeParent = ActorRef<Snapshot<unknown>, BridgeEvents>
+const addError =
+	(e: Error) =>
+	({ context }: ActionArgs<BridgeOperationContext, ErrorActorEvent, BridgeOperationEvents>) => {
+		logger.error(e)
+		return { errors: [...context.errors, e] }
+	}
 
+const addToContext = ({
+	context,
+	key,
+	transaction,
+	result
+}: {
+	context: BridgeOperationContext
+	key: keyof BridgeOperationContext["transactions"]
+	transaction?: string
+	result?: Result | Error
+}) =>
+	produce(context, (draft) => {
+		if (transaction) draft.transactions[key] = { transaction, result: null }
+		if (result && draft.transactions[key]) {
+			if (result instanceof Error) throw result
+			draft.transactions[key].result = result
+		}
+	})
+
+const sendAndConfirm = (
+	context: BridgeOperationContext,
+	key: keyof BridgeOperationContext["transactions"]
+) => {
+	if (!context.transactions[key]) throw new Error("No transaction to confirm")
+	return {
+		id: context.id,
+		transaction: context.transactions[key].transaction,
+		wallet: context.wallet
+	}
+}
+
+//To avoid circular dependencies
+type Bridge = ActorRef<Snapshot<unknown> & { context: BridgeContext }, BridgeEvents>
 type Wallet = ActorRefFromLogic<typeof walletMachine>
+
 export type ReturnTo =
 	| false
-	| "CONFIRMING_TRANSFER_REQUEST"
-	| "FINDING_ALL_TRANSFERS"
-	| "FINDING_SYNCED_TRANSFERS"
-	| "CONFIRMING_TRANSFER_CLAIM"
+	| "INIT_BRIDGE_OPERATION"
+	| "FINALIZE_DEPOSIT"
+	| "FINALIZE_WITHDRAWAL"
+	| "TO_FINALIZE"
 
-interface BridgeOperationContext {
-	bridge: BridgeParent
+type Direction = "deposit" | "withdrawal"
+
+type WalletTransaction = { transaction: string; result: Result | null } | null
+
+type BridgeOperationEvents =
+	| { type: "SetCurrentNetwork"; network: Networks }
+	| { type: "StartBridgeOperation" }
+	| { type: "CompleteBridgeOperation" }
+	| { type: "Resume"; paused: boolean }
+	| { type: "Pause" }
+	| { type: "ReturnTo" }
+	| { type: "CanFinalize" }
+	| { type: "Finalize" }
+	| { type: "Destroy" }
+
+export interface BridgeOperationContext {
+	id: string
+	bridge: Bridge
 	wallet: Wallet
-	returnTo: ReturnTo
-	requestAccountUpdates: string
-	claimAccountUpdates: string
-	sourceNetwork: Networks
-	destinationNetwork: Networks
-	changeNetworkTo: Networks
+	user: string
+	direction: Direction
+	source: Networks
+	destination: Networks
+	l1: Networks
+	l2: Networks
 	amount: string
-	requestHash: string
-	claimHash: string
-	claimParameters: {
-		transfer?: Transfer
-		afterAll?: After
-		after?: After
+	paused: boolean
+	transaction?: ActionState["transaction"]
+	errors: Error[]
+	transactions: {
+		submitDeposit: WalletTransaction
+		finalizeDeposit: WalletTransaction
+		submitWithdrawal: WalletTransaction
+		finalizeWithdrawal: WalletTransaction
 	}
+	returnTo: ReturnTo
+	changeNetworkTo: Networks
 }
 const currentNetwork = (context: BridgeOperationContext) =>
 	context.wallet.getSnapshot().context.currentNetwork
 
+const fetchMina = ({ network }: { network: Networks }) =>
+	({
+		type: "FetchBalance",
+		network,
+		tokens: [] as []
+	}) as const
+
+const POLL_INTERVAL = 20_000
+
+type BridgeWorker = { bridge: Bridge; l1: Networks; l2: Networks; user: string }
+const worker = (bridge: Bridge) => bridge.getSnapshot().context.worker
+
+//TODO: Error handling
 export const bridgeOperationMachine = setup({
 	types: {
 		context: {} as BridgeOperationContext,
 		input: {} as {
-			bridge: BridgeParent
+			bridge: Bridge
 			wallet: Wallet
-			sourceNetwork: Networks
-			destinationNetwork: Networks
+			direction: Direction
+			source: Networks
+			destination: Networks
 			amount: string
+			transaction?: ActionState["transaction"]
 		},
-		events: {} as
-			| { type: "SetCurrentNetwork"; network: Networks }
-			| { type: "StartBridgeOperation" }
-			| { type: "ReturnTo" }
+		events: {} as BridgeOperationEvents,
+		tags: {} as "loading" | "cta",
+		meta: {} as { step: number }
 	},
 	actors: {
-		proveTransferRequest: fromPromise<string, { direction: Direction; amount: string }>(
-			async () => {
-				await wait()
-				return "someAccountUpdates"
+		transactionMachine,
+		submitDeposit: fromPromise<string, BridgeWorker & { amount: string }>(({ input }) => {
+			return act("submitDeposit", async () => {
+				const { bridge, l1, l2, amount, user } = input
+				const tx = await worker(bridge).submitDeposit({ l1, l2, user, amount })
+				return tx
+			})
+		}),
+		pendingDeposit: fromCallback<EventObject, BridgeWorker>(({ sendBack, input }) => {
+			const label = "pendingDeposit"
+			const stop = measure(label)
+			logger.start(label)
+			const { bridge, l1, l2, user } = input
+			const checkDepositStatus = async () => {
+				logger.info("Checking deposit status ...")
+				const can = await worker(bridge).canFinalizeDeposit({ l1, l2, user })
+				if (can) sendBack({ type: "CanFinalize" })
 			}
-		),
-		confirmTransferRequest: fromPromise<string, { accountUpdates: string }>(async () => {
-			await wait()
-			return "transactionHash"
+			checkDepositStatus()
+			const interval = setInterval(checkDepositStatus, POLL_INTERVAL)
+			return () => {
+				clearInterval(interval)
+				logger.success(label)
+				stop()
+			}
 		}),
-		findAllTransfers: fromPromise(async () => {
-			await wait()
-			return { transfer: {}, afterAll: {} } as AllTransfers
+		finalizeDeposit: fromPromise<string, BridgeWorker>(({ input }) => {
+			return act("finalizeDeposit", async () => {
+				const { bridge, l1, l2, user } = input
+				const tx = await worker(bridge).finalizeDeposit({ l1, l2, user })
+				return tx
+			})
 		}),
-		findSyncedTransfers: fromPromise<SyncedTransfers, AllTransfers>(async () => {
-			await wait()
-			return { after: {} } as SyncedTransfers
+		submitWithdrawal: fromPromise<string, BridgeWorker & { amount: string }>(({ input }) => {
+			return act("submitWithdrawal", async () => {
+				const { bridge, l1, l2, amount, user } = input
+				const tx = await worker(bridge).submitWithdrawal({ l1, l2, user, amount })
+				return tx
+			})
 		}),
-		proveTransferClaim: fromPromise<string, { after: After; direction: Direction }>(async () => {
-			return "someAccountUpdates"
+		pendingWithdrawal: fromCallback<EventObject, BridgeWorker>(({ sendBack, input }) => {
+			const label = "pendingWithdrawal"
+			const stop = measure(label)
+			logger.start(label)
+			const { bridge, user, l1, l2 } = input
+			const checkWithdrawalStatus = async () => {
+				logger.info("Checking withdrawal status...")
+				const can = await worker(bridge).canFinalizeWithdrawal({ l1, l2, user })
+				if (can) sendBack({ type: "CanFinalize" })
+			}
+			checkWithdrawalStatus()
+			const interval = setInterval(checkWithdrawalStatus, POLL_INTERVAL)
+			return () => {
+				clearInterval(interval)
+				logger.success(label)
+				stop()
+			}
 		}),
-		confirmTransferClaim: fromPromise<string, { accountUpdates: string }>(async () => {
-			await wait()
-			return "transactionHash"
+		finalizeWithdrawal: fromPromise<string, BridgeWorker>(({ input }) => {
+			return act("finalizeWithdrawal", async () => {
+				const { bridge, l1, l2, user } = input
+				const tx = await worker(bridge).finalizeWithdrawal({ l1, l2, user })
+				return tx
+			})
 		})
 	},
 	guards: {
-		currentNetworkIsSource: ({ context }) => currentNetwork(context) === context.sourceNetwork,
-		currentNetworkIsDestination: ({ context }) =>
-			currentNetwork(context) === context.destinationNetwork,
-		toConfirmingTransferRequest: ({ context: { returnTo } }) =>
-			returnTo === "CONFIRMING_TRANSFER_REQUEST",
-		toFindingAllTransfers: ({ context: { returnTo } }) => returnTo === "FINDING_ALL_TRANSFERS",
-		toFindingSyncedTransfers: ({ context: { returnTo } }) =>
-			returnTo === "FINDING_SYNCED_TRANSFERS",
-		toConfirmingTransferClaim: ({ context: { returnTo } }) =>
-			returnTo === "CONFIRMING_TRANSFER_CLAIM"
+		currentNetworkIsSource: ({ context }) => currentNetwork(context) === context.source,
+		currentNetworkIsDestination: ({ context }) => currentNetwork(context) === context.destination,
+		deposit: ({ context }) => context.direction === "deposit",
+		withdrawal: ({ context }) => context.direction === "withdrawal",
+		toInitBridgeOperation: ({ context: { returnTo } }) => returnTo === "INIT_BRIDGE_OPERATION",
+		toFinalizeDeposit: ({ context: { returnTo } }) => returnTo === "FINALIZE_DEPOSIT",
+		toFinalizeWithdrawal: ({ context: { returnTo } }) => returnTo === "FINALIZE_WITHDRAWAL",
+		toFinalize: ({ context: { returnTo } }) => returnTo === "TO_FINALIZE",
+		anotherOperationIsActive: ({ context }) => {
+			const ao = context.bridge.getSnapshot().context.activeOperation
+			return ao !== null && context.id !== ao
+		}
+	},
+	delays: {
+		exitTimeout: () => 2_000
 	}
 }).createMachine({
 	id: "bridgeOperation",
 	initial: "IDLE",
-	context: ({ input: { sourceNetwork, destinationNetwork, amount, bridge, wallet } }) => ({
-		bridge,
+	context: ({
+		input: { direction, source, destination, amount, bridge, wallet, transaction },
+		self: { id }
+	}) => ({
+		id,
 		wallet,
-		changeNetworkTo: sourceNetwork,
-		sourceNetwork,
-		destinationNetwork,
+		bridge,
+		user: wallet.getSnapshot().context.account,
+		direction,
+		changeNetworkTo: source,
+		source,
+		destination,
 		amount,
 		returnTo: false,
-		requestAccountUpdates: "",
-		claimAccountUpdates: "",
-		requestHash: "",
-		claimHash: "",
-		claimParameters: {}
+		paused: false,
+		transaction,
+		errors: [],
+		transactions: {
+			submitDeposit: null,
+			finalizeDeposit: null,
+			submitWithdrawal: null,
+			finalizeWithdrawal: null
+		},
+		l1: source.includes("mina") ? source : destination,
+		l2: source.includes("zeko") ? source : destination
 	}),
 	on: {
+		Destroy: {
+			description: "When the operation is destroyed, we immediately exit all states.",
+			target: ".BRIDGE_OPERATION_DONE_NOOP"
+		},
 		SetCurrentNetwork: {
 			description:
 				"When the parent change the network, we receive the event and raise a return to an action if we can.",
-			actions: enqueueActions(({ context, enqueue }) => {
-				if (context.returnTo !== false) enqueue.raise({ type: "ReturnTo" })
+			actions: enqueueActions(({ context, enqueue, event }) => {
+				if (context.returnTo !== false) {
+					if (context.changeNetworkTo === event.network) enqueue.raise({ type: "ReturnTo" })
+					else {
+						//If we are still on the wrong network, we need to request a change
+						enqueue.sendTo(
+							({ context }) => context.wallet,
+							({ context }) => ({ type: "RequestNetworkChange", network: context.changeNetworkTo })
+						)
+					}
+				}
 			})
 		}
 	},
 	states: {
 		IDLE: {
-			on: { StartBridgeOperation: { target: "PROVING_TRANSFER_REQUEST" } }
+			on: {
+				Resume: { target: "RESUMING", actions: assign({ paused: ({ event }) => event.paused }) },
+				Pause: { target: "PAUSED", actions: assign({ paused: true }) },
+				CompleteBridgeOperation: { target: "BRIDGE_OPERATION_DONE_NOOP" },
+				StartBridgeOperation: [
+					{ target: "INIT_BRIDGE_OPERATION", guard: "currentNetworkIsSource" },
+					{
+						target: "WAITING_FOR_NETWORK",
+						guard: "currentNetworkIsDestination",
+						actions: assign({
+							returnTo: "INIT_BRIDGE_OPERATION",
+							changeNetworkTo: ({ context }) => context.source
+						})
+					}
+				]
+			}
+		},
+		PAUSED: {
+			on: {
+				Resume: { target: "RESUMING", actions: assign({ paused: ({ event }) => event.paused }) }
+			}
+		},
+		RESUMING: {
+			description: "This state always immediately transitions.",
+			always: [
+				{ target: "PAUSED", guard: ({ context }) => context.paused === true },
+				{ target: "PENDING_WITHDRAWAL", guard: "withdrawal" },
+				{ target: "PENDING_DEPOSIT", guard: "deposit" }
+			]
+		},
+		TO_FINALIZE: {
+			tags: ["cta"],
+			meta: { step: 2 },
+			description: "This state needs an event to transition.",
+			always: [
+				{ target: "PAUSED", guard: ({ context }) => context.paused === true },
+				{ actions: ({ context }) => finalizeNotification(context) }
+			],
+			on: {
+				Finalize: [
+					{
+						target: "FINALIZE_WITHDRAWAL",
+						guard: and(["withdrawal", "currentNetworkIsDestination"])
+					},
+					{
+						target: "FINALIZE_DEPOSIT",
+						guard: and(["deposit", "currentNetworkIsDestination"])
+					},
+					{
+						target: "WAITING_FOR_NETWORK",
+						actions: assign(({ context }) => ({
+							returnTo:
+								context.direction === "deposit" ? "FINALIZE_DEPOSIT" : "FINALIZE_WITHDRAWAL",
+							changeNetworkTo: context.destination
+						}))
+					}
+				]
+			}
 		},
 		WAITING_FOR_NETWORK: {
+			description:
+				"When the network is incorrect, we request a network change and return to the previous action.",
 			entry: sendTo(
 				({ context }) => context.wallet,
-				({ context }) => ({
-					type: "RequestNetworkChange",
-					network: context.changeNetworkTo
-				})
+				({ context }) => ({ type: "RequestNetworkChange", network: context.changeNetworkTo })
 			),
 			on: {
 				ReturnTo: [
 					{
-						target: "CONFIRMING_TRANSFER_REQUEST",
-						guard: "toConfirmingTransferRequest",
+						target: "INIT_BRIDGE_OPERATION",
+						guard: "toInitBridgeOperation",
 						actions: assign({ returnTo: false })
 					},
 					{
-						target: "FINDING_ALL_TRANSFERS",
-						guard: "toFindingAllTransfers",
+						target: "FINALIZE_DEPOSIT",
+						guard: "toFinalizeDeposit",
 						actions: assign({ returnTo: false })
 					},
 					{
-						target: "FINDING_SYNCED_TRANSFERS",
-						guard: "toFindingSyncedTransfers",
+						target: "FINALIZE_WITHDRAWAL",
+						guard: "toFinalizeWithdrawal",
 						actions: assign({ returnTo: false })
 					},
 					{
-						target: "CONFIRMING_TRANSFER_CLAIM",
-						guard: "toConfirmingTransferClaim",
+						target: "TO_FINALIZE",
+						guard: "toFinalize",
 						actions: assign({ returnTo: false })
 					}
 				]
 			}
 		},
-		PROVING_TRANSFER_REQUEST: {
-			invoke: {
-				src: "proveTransferRequest",
-				input: ({ context }) => ({
-					direction: context.destinationNetwork.includes("zeko") ? "DEPOSIT" : "WITHDRAW",
-					amount: context.amount
-				}),
-				onDone: [
-					{
-						target: "CONFIRMING_TRANSFER_REQUEST",
-						description: "Must be started on the source network.",
-						actions: assign({
-							requestAccountUpdates: ({ event }) => event.output
-						}),
-						guard: "currentNetworkIsSource"
-					},
-					{
-						target: "WAITING_FOR_NETWORK",
-						actions: assign({
-							returnTo: "CONFIRMING_TRANSFER_REQUEST",
-							changeNetworkTo: ({ context }) => context.sourceNetwork,
-							requestAccountUpdates: ({ event }) => event.output
-						}),
-						guard: "currentNetworkIsDestination"
-					}
-				]
-			}
+		INIT_BRIDGE_OPERATION: {
+			always: [
+				{ target: "SUBMIT_DEPOSIT", guard: "deposit" },
+				{ target: "SUBMIT_WITHDRAWAL", guard: "withdrawal" }
+			]
 		},
-		CONFIRMING_TRANSFER_REQUEST: {
-			invoke: {
-				src: "confirmTransferRequest",
-				input: ({ context }) => ({
-					accountUpdates: context.requestAccountUpdates
-				}),
-				onDone: [
-					{
-						target: "FINDING_ALL_TRANSFERS",
-						description: "Must be started on the source network.",
-						actions: assign(({ event }) => ({ requestHash: event.output })),
-						guard: "currentNetworkIsSource"
-					},
-					{
-						target: "WAITING_FOR_NETWORK",
-						actions: assign({
-							returnTo: "FINDING_ALL_TRANSFERS",
-							changeNetworkTo: ({ context }) => context.sourceNetwork,
-							requestHash: ({ event }) => event.output
-						}),
-						guard: "currentNetworkIsDestination"
-					}
-				]
-			}
-		},
-		FINDING_ALL_TRANSFERS: {
-			invoke: {
-				src: "findAllTransfers",
-				onDone: [
-					{
-						target: "FINDING_SYNCED_TRANSFERS",
-						description: "Must be started on the destination network.",
-						actions: assign({
-							claimParameters: ({ event }) => ({
-								transfer: event.output.transfer,
-								afterAll: event.output.afterAll
-							})
-						}),
-						guard: "currentNetworkIsDestination"
-					},
-					{
-						target: "WAITING_FOR_NETWORK",
-						actions: assign({
-							returnTo: "FINDING_SYNCED_TRANSFERS",
-							changeNetworkTo: ({ context }) => context.destinationNetwork,
-							claimParameters: ({ event }) => ({
-								transfer: event.output.transfer,
-								afterAll: event.output.afterAll
-							})
-						}),
-						guard: "currentNetworkIsSource"
-					}
-				]
-			}
-		},
-		FINDING_SYNCED_TRANSFERS: {
-			invoke: {
-				src: "findSyncedTransfers",
-				input: ({ context }) => ({
-					afterAll: isDefined(context.claimParameters.afterAll),
-					transfer: isDefined(context.claimParameters.transfer)
-				}),
-				onDone: {
-					target: "PROVING_TRANSFER_CLAIM",
-					actions: assign(({ context, event }) => ({
-						claimParameters: {
-							...context.claimParameters,
-							after: event.output.after
+		SUBMIT_DEPOSIT: {
+			initial: "transaction",
+			states: {
+				transaction: {
+					tags: ["loading"],
+					meta: { step: 0 },
+					invoke: {
+						src: "submitDeposit",
+						input: ({ context }) => ({ ...bridgeParameters(context), amount: context.amount }),
+						onDone: {
+							target: "send_and_confirm",
+							actions: assign(({ context, event }) =>
+								addToContext({ context, key: "submitDeposit", transaction: event.output })
+							)
+						},
+						onError: {
+							target: "#bridgeOperation.FAILED",
+							actions: sendTo(
+								({ context }) => context.bridge,
+								({ self }) => ({ type: "TerminateOperation", id: self.id })
+							)
 						}
-					}))
-				}
-			}
-		},
-		PROVING_TRANSFER_CLAIM: {
-			invoke: {
-				src: "proveTransferClaim",
-				input: ({ context }) => ({
-					direction: context.destinationNetwork.includes("zeko")
-						? ("DEPOSIT" as const)
-						: ("WITHDRAW" as const),
-					after: isDefined(context.claimParameters.after)
-				}),
-				onDone: [
-					{
-						target: "CONFIRMING_TRANSFER_CLAIM",
-						description: "Must be started on the destination network.",
-						actions: assign({
-							claimAccountUpdates: ({ event }) => event.output
-						}),
-						guard: "currentNetworkIsDestination"
-					},
-					{
-						target: "WAITING_FOR_NETWORK",
-						actions: assign({
-							returnTo: "CONFIRMING_TRANSFER_CLAIM",
-							changeNetworkTo: ({ context }) => context.destinationNetwork,
-							claimAccountUpdates: ({ event }) => event.output
-						}),
-						guard: "currentNetworkIsSource"
 					}
-				]
+				},
+				send_and_confirm: {
+					tags: ["loading"],
+					meta: { step: 1 },
+					invoke: {
+						src: "transactionMachine",
+						input: ({ context }) => ({ ...sendAndConfirm(context, "submitDeposit") }),
+						onDone: {
+							target: "done",
+							actions: assign(({ context, event }) =>
+								addToContext({ context, key: "submitDeposit", result: event.output.result })
+							)
+						},
+						onError: {
+							target: "#bridgeOperation.FAILED",
+							actions: sendTo(
+								({ context }) => context.bridge,
+								({ self }) => ({ type: "TerminateOperation", id: self.id })
+							)
+						}
+					}
+				},
+				done: {
+					type: "final",
+					meta: { step: 1 },
+					entry: sendTo(
+						({ context }) => context.wallet,
+						({ context }) => fetchMina({ network: context.source })
+					)
+				}
+			},
+			onDone: [
+				{
+					target: "PAUSED",
+					guard: "anotherOperationIsActive",
+					actions: [
+						sendTo(
+							({ context }) => context.bridge,
+							({ self }) => ({ type: "PauseOperation", id: self.id })
+						),
+						assign({ paused: true })
+					]
+				},
+				{ target: "PENDING_DEPOSIT" }
+			]
+		},
+		PENDING_DEPOSIT: {
+			tags: ["loading"],
+			meta: { step: 1 },
+			invoke: {
+				src: "pendingDeposit",
+				input: ({ context }) => ({ ...bridgeParameters(context), amount: context.amount })
+			},
+			on: {
+				CanFinalize: { target: "TO_FINALIZE" }
 			}
 		},
-		CONFIRMING_TRANSFER_CLAIM: {
-			invoke: {
-				src: "confirmTransferClaim",
-				input: ({ context: { claimAccountUpdates } }) => ({
-					accountUpdates: claimAccountUpdates
-				}),
-				onDone: {
-					target: "BRIDGE_OPERATION_DONE",
-					actions: assign(({ event }) => ({
-						accountUpdates: "",
-						claimHash: event.output
-					}))
+		FINALIZE_DEPOSIT: {
+			initial: "transaction",
+			states: {
+				transaction: {
+					tags: ["loading"],
+					meta: { step: 2 },
+					invoke: {
+						src: "finalizeDeposit",
+						input: ({ context }) => ({ ...bridgeParameters(context) }),
+						onDone: {
+							target: "send_and_confirm",
+							actions: assign(({ context, event }) =>
+								addToContext({ context, key: "finalizeDeposit", transaction: event.output })
+							)
+						},
+						onError: [
+							{
+								target: "#bridgeOperation.FAILED",
+								guard: ({ context }) => context.errors.length > 3,
+								actions: assign(addError(new Error("Failed to finalize deposit")))
+							},
+							{
+								target: "#bridgeOperation.PENDING_DEPOSIT",
+								actions: assign(addError(new Error("Failed to finalize deposit")))
+							}
+						]
+					}
+				},
+				send_and_confirm: {
+					tags: ["loading"],
+					meta: { step: 3 },
+					invoke: {
+						src: "transactionMachine",
+						input: ({ context }) => ({ ...sendAndConfirm(context, "finalizeDeposit") }),
+						onDone: {
+							target: "done",
+							actions: assign(({ context, event }) =>
+								addToContext({ context, key: "finalizeDeposit", result: event.output.result })
+							)
+						},
+						onError: {
+							target: "#bridgeOperation.FAILED",
+							// target: "send_and_confirm",
+							// reenter: true,
+							actions: assign(({ context, event }) => ({
+								errors: [...context.errors, event.error as Error]
+							}))
+						}
+					}
+				},
+				done: { type: "final" }
+			},
+			onDone: { target: "BRIDGE_OPERATION_COMPLETED" }
+		},
+		SUBMIT_WITHDRAWAL: {
+			initial: "transaction",
+			states: {
+				transaction: {
+					tags: ["loading"],
+					meta: { step: 0 },
+					invoke: {
+						src: "submitWithdrawal",
+						input: ({ context }) => ({ ...bridgeParameters(context), amount: context.amount }),
+						onDone: {
+							target: "send_and_confirm",
+							actions: assign(({ context, event }) =>
+								addToContext({ context, key: "submitWithdrawal", transaction: event.output })
+							)
+						},
+						onError: {
+							target: "#bridgeOperation.FAILED",
+							actions: sendTo(
+								({ context }) => context.bridge,
+								({ self }) => ({ type: "TerminateOperation", id: self.id })
+							)
+						}
+					}
+				},
+				send_and_confirm: {
+					tags: ["loading"],
+					meta: { step: 1 },
+					invoke: {
+						src: "transactionMachine",
+						input: ({ context }) => ({ ...sendAndConfirm(context, "submitWithdrawal") }),
+						onDone: {
+							target: "done",
+							actions: assign(({ context, event }) =>
+								addToContext({ context, key: "submitWithdrawal", result: event.output.result })
+							)
+						},
+						onError: {
+							target: "#bridgeOperation.FAILED",
+							actions: sendTo(
+								({ context }) => context.bridge,
+								({ self }) => ({ type: "TerminateOperation", id: self.id })
+							)
+						}
+					}
+				},
+				done: {
+					meta: { step: 1 },
+					type: "final",
+					entry: sendTo(
+						({ context }) => context.wallet,
+						({ context }) => fetchMina({ network: context.source })
+					)
 				}
+			},
+			onDone: [
+				{
+					target: "PAUSED",
+					guard: "anotherOperationIsActive",
+					actions: [
+						sendTo(
+							({ context }) => context.bridge,
+							({ self }) => ({ type: "PauseOperation", id: self.id })
+						),
+						assign({ paused: true })
+					]
+				},
+				{ target: "PENDING_WITHDRAWAL" }
+			]
+		},
+		PENDING_WITHDRAWAL: {
+			tags: ["loading"],
+			meta: { step: 1 },
+			invoke: {
+				src: "pendingWithdrawal",
+				input: ({ context }) => ({ ...bridgeParameters(context), amount: context.amount })
+			},
+			on: {
+				CanFinalize: { target: "TO_FINALIZE" }
 			}
+		},
+		FINALIZE_WITHDRAWAL: {
+			initial: "transaction",
+			states: {
+				transaction: {
+					tags: ["loading"],
+					meta: { step: 2 },
+					invoke: {
+						src: "finalizeWithdrawal",
+						input: ({ context }) => ({ ...bridgeParameters(context) }),
+						onDone: {
+							target: "send_and_confirm",
+							actions: assign(({ context, event }) =>
+								addToContext({ context, key: "finalizeWithdrawal", transaction: event.output })
+							)
+						},
+						onError: [
+							{
+								target: "#bridgeOperation.FAILED",
+								guard: ({ context }) => context.errors.length > 3,
+								actions: assign(addError(new Error("Failed to finalize withdrawal")))
+							},
+							{
+								target: "#bridgeOperation.PENDING_WITHDRAWAL",
+								actions: assign(addError(new Error("Failed to finalize withdrawal")))
+							}
+						]
+					}
+				},
+				send_and_confirm: {
+					tags: ["loading"],
+					meta: { step: 3 },
+					invoke: {
+						src: "transactionMachine",
+						input: ({ context }) => ({ ...sendAndConfirm(context, "finalizeWithdrawal") }),
+						onDone: {
+							target: "done",
+							actions: assign(({ context, event }) =>
+								addToContext({ context, key: "finalizeWithdrawal", result: event.output.result })
+							)
+						},
+						onError: {
+							target: "#bridgeOperation.FAILED",
+							actions: assign(({ context, event }) => ({
+								errors: [...context.errors, event.error as Error]
+							}))
+						}
+					}
+				},
+				done: {
+					type: "final",
+					meta: { step: 3 },
+					entry: sendTo(
+						({ context }) => context.wallet,
+						({ context }) => fetchMina({ network: context.destination })
+					)
+				}
+			},
+			onDone: { target: "BRIDGE_OPERATION_COMPLETED" }
+		},
+		BRIDGE_OPERATION_COMPLETED: {
+			meta: { step: 3 },
+			after: { exitTimeout: "BRIDGE_OPERATION_DONE" }
 		},
 		BRIDGE_OPERATION_DONE: {
+			meta: { step: 3 },
 			type: "final",
 			entry: sendTo(
 				({ context }) => context.bridge,
 				({ self }) => ({ type: "CompleteOperation", id: self.id })
 			)
-		}
+		},
+		BRIDGE_OPERATION_DONE_NOOP: {
+			meta: { step: 3 },
+			type: "final"
+		},
+		FAILED: { type: "final" }
 	}
 })

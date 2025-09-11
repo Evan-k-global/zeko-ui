@@ -1,121 +1,196 @@
 <script lang="ts" setup>
-import { useMachine, useSelector } from "@lumina-dex/sdk/vue"
-import { bridgeMachine } from "~~/machines/bridge"
-import { bridgeOperationMachine } from "~~/machines/bridgeOperation"
+import { useSelector } from "@lumina-dex/sdk/vue"
+import { errorToaster } from "~/helpers"
 
-const wallet = useWalletStore()
-const { address, walletLoaded, balances, currentNetwork } = storeToRefs(wallet)
+const bs = useBridgeStore()
 
-const amountToBridge = ref("")
-const walletValue = computed(() => wallet.snapshot.context)
-const totalBalances = computed(() => {
-	return `MINA: (L1) => ${JSON.stringify(balances.value["mina:devnet"])} | L2 => ${JSON.stringify(balances.value["zeko:testnet"])}`
-})
-// const totalBalances = useSelector(walletActorRef, (state) => {
-// 	return `MINA: (L1) => ${state.context.minaBalances.MINA} | L2 => ${state.context.zekoBalances.MINA}`
-// })
+const amountToBridge = ref<number | undefined>(undefined)
 
-// const totalBalances = computed(
-// 	() =>
-// 		`MINA: (L1) => ${minaBalances.value.get("mina")} | L2 => ${zekoBalances.value.get("mina")}`
-// )
+const allOperations = useSelector(bs.bridge.actorRef, (state) =>
+	Object.groupBy(
+		[...state.context.operations.values()].map(({ operation, status }) => ({
+			id: operation.id,
+			status,
+			operation
+		})),
+		({ status }) => (status === "completed" ? "complete" : "uncomplete")
+	)
+)
 
-// const minaBalanceTest = computed(() => minaBalances.value)
+const completedOperations = computed(() => allOperations.value.complete ?? [])
 
-const machine = bridgeMachine.provide({
-	actors: {
-		bridgeOperationMachine: bridgeOperationMachine.provide({
-			actors: {}
-		})
-	}
-})
+const currentOperation = computed(
+	() => allOperations.value.uncomplete?.[0]?.operation
+)
 
-//MOCK
-const { send, snapshot, actorRef } = useMachine(bridgeMachine, {
-	input: { wallet: wallet.actorRef, currentNetwork: currentNetwork.value },
-	inspect: (event) => {
-		if (event.type === "@xstate.event") {
-			// console.log(event)
+const queuedOperations = computed(
+	() =>
+		allOperations.value.uncomplete
+			?.slice(1)
+			.map(({ operation }) => operation) ?? []
+	// Array.from({ length: 10 }).map(
+	// 	() =>
+	// 		useMachine(bridgeOperationMachine, {
+	// 			input: {
+	// 				bridgeMachine: bs.bridge.actorRef,
+	// 				wallet: bs.wallet.actorRef,
+	// 				amount: "10",
+	// 				direction: "withdrawal",
+	// 				source: "zeko:testnet",
+	// 				destination: "mina:devnet"
+	// 			}
+	// 		}).actorRef
+	// )
+)
+
+const currentOperationErrors = computed(
+	() => currentOperation.value?.getSnapshot().context.errors
+)
+
+const startBridge = () => {
+	const amount = (amountToBridge.value ?? 0).toString()
+	bs.bridge.send({ type: "StartOperation", amount })
+	amountToBridge.value = undefined
+}
+
+watch(currentOperationErrors, (errors) => {
+	if (errors) {
+		const [e] = errors.toReversed()
+		if (e) {
+			errorToaster.create({
+				title: "Error",
+				description: e.message,
+				type: "error"
+			})
 		}
 	}
 })
-
-//PROD
-// const { send, snapshot, actorRef } = useMachine(machine, {
-// 	input: {} //Pass some initial state.
-// })
-
-// actorRef.subscribe((state) => {
-// 	console.log("State", state.context)
-// })
-
-const source = computed(() => snapshot.value.context.sourceNetwork)
-const destination = computed(() => snapshot.value.context.destinationNetwork)
-
-const network = useSelector(
-	wallet.actorRef,
-	(state) => state.context.currentNetwork
-)
-
-const children = useSelector(actorRef, (state) => [
-	...state.context.operations.values()
-])
 </script>
 <template>
-  <hr />
+  <Disabled
+    v-if='
+      bs.currentNetwork.includes("mainnet") ||
+      bs.wallet.snapshot.error ||
+      (bs.address.length === 0 && bs.wallet.snapshot.matches("INIT"))
+    '
+  />
+  <div
+    class="Bridge"
+    v-else-if='!bs.currentNetwork.includes("mainnet")'>
+    <div
+      class="MainOperation"
+      :class="{ NoOperation: !currentOperation }">
+      <div class="MainOperationInput">
+        <div class="InputBox">
+          <h4>Sending</h4>
+          <BridgeAmountSelector v-model="amountToBridge" />
+        </div>
 
-  <div :data-xstate="walletValue" v-show="walletLoaded">
-    <!-- <h2>Bridge</h2>
-    <hr>
-    <h3>Instructions :</h3>
-    <p>1. Chose a source and a destination</p>
-    <p>2. Select and deposit your tokens from the source network.</p>
-    <p>3. Withdraw your tokens from the destination network.</p>
-    <hr /> -->
-    Sending {{ amountToBridge }} from {{ source }}
-    to {{ destination }}
-    <hr />
-    XState: {{ snapshot.value }}
-    Children :
-    <ul>
-      <li v-for="(child, index) of children" :key="index">
-        <template v-if="child">
-          <Operation :operation="child.operation" />
-        </template>
-      </li>
-    </ul>
-    <hr />
-    XState current Network : {{ network }}
-    Computed:
-    {{ balances }}
-    <hr />
-    Source: {{ source }}
-    <Button @click='send({ type: "InvertDirection" })'><==></Button>
-    Destination:
-    {{ destination }}
-    <hr />
-    <div>
-      <p>Amount to bridge :</p>
-      <fieldset role="group">
-        <Button disabled>Mina</Button>
-        <input v-model="amountToBridge" type="text" />
-        <input type="submit" disabled v-model="totalBalances" />
-      </fieldset>
-
-      <hr />
-
-      <div role="group">
-        <!-- <button v-if="canBridge" @click="startBridge">Bridge</button> -->
-        <!-- <button v-if="canClaim" @click="confirm">Claim</button> -->
-        <!-- <button @click='send({ type: "BridgeToMina" })'>BridgeToMina</button> -->
-        <!-- <button @click='send({ type: "BridgeToZeko" })'>BridgeToZeko</button> -->
+        <FromTo
+          :source="bs.bridge.snapshot.context.sourceNetwork"
+          :destination="bs.bridge.snapshot.context.destinationNetwork"
+        />
+        <Button
+          class="BridgeButton"
+          variant="cta2"
+          @click="startBridge"
+          :disabled="!amountToBridge || amountToBridge <= 0 || bs.address.length === 0">
+          Send
+        </Button>
       </div>
-      <hr />
-      <Button
-        v-if='snapshot.matches("READY")'
-        @click='send({ type: "StartOperation", amount: amountToBridge })'>
-        Bridge
-      </Button>
+      <CurrentOperation
+        v-if="currentOperation"
+        :operation="currentOperation"
+      />
+    </div>
+    <!-- <pre>{{  allOperations }}</pre> -->
+    <div v-if="queuedOperations.length > 0" class="NextTransactions">
+      <!-- <h3>Next Transactions</h3> -->
+      <div class="QueuedOperations">
+        <QueuedOperation
+          v-for="(operation, index) of queuedOperations"
+          :operation
+          :index
+        />
+      </div>
+      <h4>
+        You will be able to complete these transactions once the current
+        transaction is completed.
+      </h4>
+    </div>
+    <div class="CompletedTransactions">
+      <AnimatedLoadingSpinner
+        class="Spinner"
+        v-if='bs.bridge.snapshot.matches("FIND_OPERATIONS")'
+      />
+      <template v-else>
+        <h3>Completed Transactions</h3>
+        <BridgeOperations :operations="completedOperations" />
+      </template>
     </div>
   </div>
+
+  <div v-else>
+    <AnimatedLoadingSpinner />
+  </div>
+  <Toast :toaster="errorToaster" />
 </template>
+<style lang="postcss" scoped>
+:deep(.InputBox) {
+  display: grid;
+  grid-template-columns: 20ch 1fr;
+  align-items: center;
+  @media (max-width: 1024px) {
+    grid-template-columns: 10ch 1fr;
+  }
+}
+.MainOperation {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2ch;
+  max-width: 100vw;
+  &.NoOperation {
+    grid-template-columns: auto;
+    margin: auto;
+    max-width: 120ch;
+  }
+  @media (max-width: 1024px) {
+    grid-template-columns: auto;
+    grid-template-rows: auto auto;
+    gap: 2rem;
+  }
+}
+.MainOperationInput {
+  display: grid;
+  gap: 1rem;
+  border-radius: 1rem;
+  background: oklch(1 0 0 / 0.6);
+  padding: 2rem;
+}
+
+.NextTransactions {
+  margin-top: 2rem;
+  h4 {
+    font-style: italic;
+  }
+  .QueuedOperations {
+    display: flex;
+    gap: 3ch;
+    max-width: calc(100vw - 2 * var(--page-padding, 0));
+    overflow-y: scroll;
+    padding: 1rem 0;
+  }
+}
+
+.CompletedTransactions {
+  display: grid;
+  &:has(.Spinner) {
+    place-items: center;
+  }
+  .Spinner {
+    --size: 25rem;
+    height: auto;
+    width: var(--size);
+  }
+}
+</style>

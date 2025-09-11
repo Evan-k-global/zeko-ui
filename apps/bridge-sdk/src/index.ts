@@ -37,6 +37,8 @@ import {
 	withdrawalAux
 } from "./utils"
 
+export * from "./types"
+
 export class Bridge {
 	constructor(
 		private readonly config: Config,
@@ -44,6 +46,7 @@ export class Bridge {
 		private readonly l1Client: Client,
 		private readonly l1ArchiveClient: Client,
 		private readonly l2Client: Client,
+		private readonly l2ArchiveClient: Client,
 
 		public readonly l1AccountCreationFee: UInt64,
 		public readonly l2AccountCreationFee: UInt64,
@@ -61,20 +64,25 @@ export class Bridge {
 		const l1Client = createGraphqlClient(config.l1Url)
 		const l1ArchiveClient = createGraphqlClient(config.l1ArchiveUrl)
 		const l2Client = createGraphqlClient(config.zekoUrl)
+		const l2ArchiveClient = createGraphqlClient(config.zekoArchiveUrl)
 
-		const fetchConfigResult = await l2Client.query(fetchConfigQuery, {})
+		const [fetchConfigResult, genesisConstantL2Result, genesisConstantL1Result, sequencerPkResult] =
+			await Promise.all([
+				l2Client.query(fetchConfigQuery, {}),
+				l2Client.query(genesisConstantsQueryL2, {}),
+				l1Client.query(genesisConstantsQueryL1, {}),
+				l2Client.query(sequencerPkQuery, {})
+			])
+
 		const circuitsConfig = fetchConfigResult.data?.circuitsConfig
 		if (!circuitsConfig) throw new Error("Circuits config not found")
 
-		const genesisConstantL1Result = await l1Client.query(genesisConstantsQueryL1, {})
 		const l1AccountCreationFee = genesisConstantL1Result.data?.genesisConstants?.accountCreationFee
 		if (!l1AccountCreationFee) throw new Error("L1 account creation fee not found")
 
-		const genesisConstantL2Result = await l2Client.query(genesisConstantsQueryL2, {})
 		const l2AccountCreationFee = genesisConstantL2Result.data?.genesisConstants?.accountCreationFee
 		if (!l2AccountCreationFee) throw new Error("L2 account creation fee not found")
 
-		const sequencerPkResult = await l2Client.query(sequencerPkQuery, {})
 		const sequencerPk = sequencerPkResult.data?.sequencerPk
 		if (!sequencerPk) throw new Error("Sequencer public key not found")
 
@@ -83,6 +91,7 @@ export class Bridge {
 			l1Client,
 			l1ArchiveClient,
 			l2Client,
+			l2ArchiveClient,
 			UInt64.from(l1AccountCreationFee),
 			UInt64.from(l2AccountCreationFee),
 			PublicKey.fromBase58(circuitsConfig.zekoL1),
@@ -202,38 +211,40 @@ export class Bridge {
 		const actions = await fetchActions(this.l1ArchiveClient, this.outerPk, actionStates)
 		const currentSlot = await this.fetchCurrentSlot()
 
-		return actions.map(({ beforeActionState, afterActionState, action }) => {
-			if (action[0].equals(0).toBoolean()) {
-				return {
-					type: "commit",
-					ledger: action[1],
-					innerActionState: action[2],
-					innerActionStateLength: UInt32.fromFields([action[3]]),
-					synchronizedOuterActionState: action[4],
-					synchronizedOuterActionStateLength: UInt32.fromFields([action[5]]),
-					slotRange: {
-						lower: UInt32.fromFields([action[6]]),
-						upper: UInt32.fromFields([action[7]])
-					},
-					isPastWithdrawalDelay: currentSlot
-						.greaterThan(UInt32.fromFields([action[7]]).add(this.withdrawalDelay))
-						.toBoolean(),
-					action: { beforeActionState, afterActionState, action }
+		return actions.map(
+			({ beforeActionState, afterActionState, action, hash, status, timestamp }) => {
+				if (action[0].equals(0).toBoolean()) {
+					return {
+						type: "commit",
+						ledger: action[1],
+						innerActionState: action[2],
+						innerActionStateLength: UInt32.fromFields([action[3]]),
+						synchronizedOuterActionState: action[4],
+						synchronizedOuterActionStateLength: UInt32.fromFields([action[5]]),
+						slotRange: {
+							lower: UInt32.fromFields([action[6]]),
+							upper: UInt32.fromFields([action[7]])
+						},
+						isPastWithdrawalDelay: currentSlot
+							.greaterThan(UInt32.fromFields([action[7]]).add(this.withdrawalDelay))
+							.toBoolean(),
+						action: { beforeActionState, afterActionState, action, hash, status, timestamp }
+					}
 				}
-			}
-			if (action[0].equals(1).toBoolean()) {
-				return {
-					type: "witness",
-					aux: action[1],
-					action: { beforeActionState, afterActionState, action }
+				if (action[0].equals(1).toBoolean()) {
+					return {
+						type: "witness",
+						aux: action[1],
+						action: { beforeActionState, afterActionState, action, hash, status, timestamp }
+					}
 				}
+				throw new Error("Invalid outer action type")
 			}
-			throw new Error("Invalid outer action type")
-		})
+		)
 	}
 
 	private async fetchUserWithdrawals(pk: PublicKey): Promise<Withdrawal[]> {
-		const userInnerActions = await fetchActions(this.l2Client, pk)
+		const userInnerActions = await fetchActions(this.l2ArchiveClient, pk)
 
 		return filterNulls(
 			userInnerActions.map(({ action }) => {
@@ -253,21 +264,23 @@ export class Bridge {
 	}
 
 	private async fetchInnerActions(actionStates?: Mina.ActionStates): Promise<InnerAction[]> {
-		const actions = await fetchActions(this.l2Client, this.innerPk, actionStates)
+		const actions = await fetchActions(this.l2ArchiveClient, this.innerPk, actionStates)
 
-		return actions.map(({ beforeActionState, afterActionState, action }) => {
-			if (action[0].equals(0).toBoolean()) {
-				return {
-					type: "witness",
-					aux: action[1],
-					action: { beforeActionState, afterActionState, action }
+		return actions.map(
+			({ beforeActionState, afterActionState, action, hash, status, timestamp }) => {
+				if (action[0].equals(0).toBoolean()) {
+					return {
+						type: "witness",
+						aux: action[1],
+						action: { beforeActionState, afterActionState, action, hash, status, timestamp }
+					}
 				}
+				throw new Error("Invalid inner action type")
 			}
-			throw new Error("Invalid inner action type")
-		})
+		)
 	}
 
-	private async pollQuery(key: string, pollPeriod = 1_000) {
+	private async pollQuery(key: string, pollPeriod = 5_000) {
 		let provedForest: string | null = null
 		let attempts = 0
 
@@ -280,6 +293,7 @@ export class Bridge {
 			attempts++
 
 			const resultResponse = await this.l2Client.query(provedForestQuery, { key })
+			if (resultResponse.error) throw resultResponse.error
 			provedForest = resultResponse.data?.provedForest ?? null
 		}
 
@@ -292,12 +306,12 @@ export class Bridge {
 			recipient,
 			amount,
 			timeout,
-			holderAccountL1
+			holderAccountL1 = this.outerHolders[0]
 		}: {
 			recipient: PublicKey
 			amount: UInt64
 			timeout: UInt32
-			holderAccountL1: PublicKey
+			holderAccountL1?: PublicKey
 		}
 	): Promise<Mina.Transaction<false, false>> {
 		this.setL1()
@@ -414,6 +428,7 @@ export class Bridge {
 			.map(({ action }) => fromList([action.action]).hash)
 
 		return {
+			aseTarget: syncedOuterActionState,
 			depositParams,
 			helperAccount,
 			witness: {
@@ -447,20 +462,34 @@ export class Bridge {
 
 	public async finalizeDeposit(
 		pk: PublicKey,
-		fee: UInt64 = UInt64.zero
+		fee: UInt64 = UInt64.zero,
+		attempts = 5
 	): Promise<Mina.Transaction<false, false>> {
-		const witnesses = await this.fetchDepositFinalizationWitnesses(pk)
+		const prove = async (attempts: number) => {
+			if (attempts === 0) throw new Error("Failed to prove deposit finalization")
 
-		if (!witnesses) throw new Error("Did not find any deposit to finalize")
+			const witnesses = await this.fetchDepositFinalizationWitnesses(pk)
 
-		const { witness, depositParams, helperAccount } = witnesses
+			if (!witnesses) throw new Error("Did not find any deposit to finalize")
 
-		const { data } = await this.l2Client.mutation(finalizeDepositMutation, {
-			input: witness
-		})
+			const { witness, depositParams, helperAccount, aseTarget } = witnesses
 
-		if (!data?.request?.key) throw new Error("No key returned from mutation")
-		const depositForest = await this.pollQuery(data.request.key)
+			const { data } = await this.l2Client.mutation(finalizeDepositMutation, {
+				input: witness
+			})
+
+			if (!data?.request?.key) throw new Error("No key returned from mutation")
+			const depositForest = await this.pollQuery(data.request.key)
+
+			const currentSyncedOuterActionState = await this.fetchSyncedOuterActionState()
+
+			if (currentSyncedOuterActionState.state.equals(aseTarget.state).toBoolean()) {
+				return { depositForest, depositParams, helperAccount }
+			}
+			return await prove(attempts - 1)
+		}
+
+		const { depositForest, depositParams, helperAccount } = await prove(attempts)
 
 		for (let i = 0; i < depositForest.length; i++) {
 			if (!depositForest[i].publicKey.equals(pk).toBoolean()) continue
@@ -470,7 +499,11 @@ export class Bridge {
 
 		this.setL2()
 
-		const accountCreationFee = helperAccount ? UInt64.zero : this.l2AccountCreationFee.mul(2)
+		const l2Account = await this.fetchAccount(this.l2Client, pk)
+
+		const accountCreationFee = (helperAccount ? UInt64.zero : this.l2AccountCreationFee).add(
+			l2Account ? UInt64.zero : this.l2AccountCreationFee
+		)
 
 		const txn = await Mina.transaction(
 			{
@@ -558,11 +591,11 @@ export class Bridge {
 			return true
 		})
 
-		if (myWithdrawalIndex === -1) throw new Error("Did not find any withdrawal to finalize")
+		if (myWithdrawalIndex === -1) return null
 
 		const myWithdrawal = innerActions[myWithdrawalIndex]
 		const withdrawalParams = findMatchingWithdrawal(myWithdrawal)
-		if (!withdrawalParams) throw new Error("Did not find withdrawal parameters")
+		if (!withdrawalParams) throw new Error("Unreachable: Did not find withdrawal parameters")
 
 		const outerActions = await this.fetchOuterActions()
 
@@ -575,7 +608,7 @@ export class Bridge {
 			return true
 		})
 
-		if (reversedLastCommitIndex === -1) throw new Error("Last commit not found")
+		if (reversedLastCommitIndex === -1) return null
 
 		const lastCommitIndex = outerActions.length - reversedLastCommitIndex - 1
 		const lastCommit = outerActions[lastCommitIndex] as OuterCommit
@@ -589,7 +622,7 @@ export class Bridge {
 		)
 
 		if (syncedInnerActionStateIndex === -1 || syncedInnerActionStateIndex < myWithdrawalIndex)
-			throw new Error("Withdrawal has not been synced")
+			return null
 
 		const withdrawalAse = innerActions
 			.slice(myWithdrawalIndex + 1, syncedInnerActionStateIndex + 1)
@@ -631,8 +664,9 @@ export class Bridge {
 	public async finalizeWithdrawal(
 		pk: PublicKey,
 		feePayer: Mina.FeePayerSpec,
-		outerHolder: PublicKey
+		_outerHolder?: PublicKey
 	): Promise<Mina.Transaction<false, false>> {
+		const outerHolder = _outerHolder ?? this.outerHolders[0]
 		const witnesses = await this.fetchWithdrawalFinalizationWitnesses(pk, outerHolder)
 
 		if (!witnesses) throw new Error("Did not find any withdrawal to finalize")
@@ -773,7 +807,6 @@ export class Bridge {
 	}
 	public async fetchInnerActionsWithStates(pk: PublicKey): Promise<InnerActionWithState[]> {
 		const withdrawals = await this.fetchUserWithdrawals(pk)
-
 		const auxesMap = new Map<bigint, Withdrawal>()
 		for (const withdrawal of withdrawals) {
 			const aux = withdrawalAux(withdrawal)

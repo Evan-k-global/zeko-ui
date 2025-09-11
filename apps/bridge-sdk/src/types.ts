@@ -4,6 +4,7 @@ export type Config = {
 	l1Url: string
 	l1ArchiveUrl: string
 	zekoUrl: string
+	zekoArchiveUrl: string
 	l1Network: NetworkId
 	l2Network: NetworkId
 	pollTimeout?: number
@@ -13,6 +14,9 @@ export type Action = {
 	action: Field[]
 	beforeActionState: Field
 	afterActionState: Field
+	timestamp: string
+	status: string
+	hash: string
 }
 
 export type Deposit = {

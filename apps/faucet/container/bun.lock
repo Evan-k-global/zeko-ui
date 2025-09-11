@@ -5,7 +5,7 @@
       "name": "faucet-container",
       "dependencies": {
         "hono": "^4.7.6",
-        "o1js": "^2.6.0",
+        "o1js": "2.8.0",
       },
       "devDependencies": {
         "@lumina-dex/sdk": "^0.17.0",
@@ -316,7 +316,7 @@
 
     "nanoid": ["nanoid@3.3.11", "", { "bin": { "nanoid": "bin/nanoid.cjs" } }, "sha512-N8SpfPUnUp1bK+PMYW8qSWdl9U+wwNWI4QKxOYDy9JAro3WMX7p2OeVRF9v+347pnakNevPmiHhNmZ2HbFA76w=="],
 
-    "o1js": ["o1js@2.6.0", "", { "dependencies": { "blakejs": "1.2.1", "cachedir": "^2.4.0", "js-sha256": "^0.9.0", "libsodium-wrappers-sumo": "^0.7.15", "reflect-metadata": "^0.1.13", "stacktrace-js": "^2.0.2", "tslib": "^2.3.0" }, "bin": { "snarky-run": "src/build/run.js" } }, "sha512-mR1BTQvIei2yfrT9tjtNDZ7Derj88wbkARPNP3n6qTRo2q0fkzWsErN+k7li/w0072g/1wypnhJSPN5R6AW6hA=="],
+    "o1js": ["o1js@2.8.0", "", { "dependencies": { "blakejs": "1.2.1", "cachedir": "^2.4.0", "js-sha256": "^0.9.0", "libsodium-wrappers-sumo": "^0.7.15", "reflect-metadata": "^0.1.13", "stacktrace-js": "^2.0.2", "tslib": "^2.3.0" }, "bin": { "snarky-run": "src/build/run.js" } }, "sha512-K9dKdx2Im8m3veFynH9J6jjvKUIXFswTrttVLmV3AITt5EvdMEKo/MiwRj5/3AGqiw5WxaqX40HfpxrPWyXcYg=="],
 
     "p-limit": ["p-limit@6.2.0", "", { "dependencies": { "yocto-queue": "^1.1.1" } }, "sha512-kuUqqHNUqoIWp/c467RI4X6mmyuojY5jGutNU0wVTmEOOfcuwLqyMVoAi9MKi2Ak+5i9+nhmrK4ufZE8069kHA=="],
 

@@ -10,10 +10,12 @@
 		"format": "dprint check",
 		"lint": "biome lint",
 		"format:fix": "dprint fmt",
+		"type:check": "tsc --noEmit",
 		"lint:fix": "biome lint --fix --unsafe",
 		"schema:zeko:get": "gql-tada generate schema 'https://alphanet.zeko.io/graphql' --output './src/graphql/generated/zeko.graphql'",
 		"schema:mina:get": "gql-tada generate schema 'https://api.minascan.io/node/devnet/v1/graphql' --output './src/graphql/generated/mina.graphql'",
 		"schema:mina:archive:get": "gql-tada generate schema 'https://api.minascan.io/archive/devnet/v1/graphql' --output './src/graphql/generated/mina-archive.graphql'",
+		"schema:zeko:archive:get": "gql-tada generate schema 'https://archive.alphanet.zeko.io/graphql' --output './src/graphql/generated/zeko-archive.graphql'",
 		"schema:get": "bun schema:zeko:get && bun schema:mina:get && bun schema:mina:archive:get",
 		"fetchOuterActions": "bun examples/fetchOuterActions.ts",
 		"fetchInnerActions": "bun examples/fetchInnerActions.ts",
@@ -41,7 +43,7 @@
 	},
 	"dependencies": {
 		"@urql/exchange-retry": "^1.3.0",
-		"o1js": "^2.6.0",
+		"o1js": "catalog:",
 		"urql": "^4.2.2",
 		"valibot": "^1.1.0"
 	},

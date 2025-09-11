@@ -9,16 +9,19 @@
 		"build": "nuxt build playground",
 		"generate": "nuxt generate playground",
 		"postinstall": "nuxt prepare playground",
-		"preview": "nuxt preview playground"
+		"preview": "nuxt preview playground",
+		"cssforge": "node node_modules/@hebilicious/cssforge/src/cli --css app/assets/styles/cssforge.css"
 	},
 	"devDependencies": {
-		"nuxt": "^4.0.3",
-		"typescript": "^5.8.3",
-		"vue": "latest"
+		"@hebilicious/cssforge": "catalog:",
+		"nuxt": "catalog:",
+		"typescript": "catalog:",
+		"vue": "catalog:"
 	},
 	"dependencies": {
-		"@ark-ui/vue": "^5.9.1",
+		"@ark-ui/vue": "catalog:",
+		"@hebilicious/nuxt-switch-match": "catalog:",
 		"@zeko/design": "workspace:^",
-		"lucide-vue-next": "^0.453.0"
+		"lucide-vue-next": "catalog:"
 	}
 }

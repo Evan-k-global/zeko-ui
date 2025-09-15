@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 # This is the CI script to build the project and create a Sentry release with sourcemaps and deploy it to Cloudflare Workers.
 # In an ideal world, the Nuxt Module / Vite plugin would work, but it doesn't.
@@ -8,6 +9,7 @@
 # SENTRY_DSN_PUBLIC
 # SENTRY_AUTH_TOKEN
 
+export SENTRY_LOG_LEVEL="debug"
 export PATH="$PATH:./node_modules/.bin"
 OUTPUT_DIR="./.output"
 
@@ -25,12 +27,12 @@ else
 fi
 
 # NUXT
-echo "Building RELEASE $SENTRY_RELEASE with DSN $SENTRY_DSN_PUBLIC on environment $SENTRY_ENVIRONMENT"
-pnpm build:cf
+echo "Building RELEASE $SENTRY_RELEASE with DSN $SENTRY_DSN_PUBLIC on environment $SENTRY_ENVIRONMENT ..."
+nuxt build --logLevel verbose
 echo "Build completed."
 
 # SENTRY
-echo "Releasing version $SENTRY_RELEASE to Sentry in environment $SENTRY_ENVIRONMENT"
+echo "Releasing version $SENTRY_RELEASE to Sentry in environment $SENTRY_ENVIRONMENT ..."
 # Create a release
 sentry-cli releases new -p zeko-bridge $SENTRY_RELEASE
 # Associate commits with the release
@@ -42,15 +44,16 @@ sentry-cli sourcemaps upload --release=$SENTRY_RELEASE $OUTPUT_DIR
 sentry-cli deploys new --release=$SENTRY_RELEASE -e $SENTRY_ENVIRONMENT
 echo "Sentry release and sourcemaps done."
 
-echo "Deploying to Cloudflare Workers"
 if [[ "$WORKERS_CI_BRANCH" == "main" ]]; then
+  echo "Deploying Worker to Production ..."
   wrangler deploy
-else 
+else
+  echo "Deploying Worker Preview ..."
   wrangler versions upload
 fi
 echo "Deployment completed for branch $WORKERS_CI_BRANCH."
 
 # Finalize the release
-echo "Finalizing Sentry release $SENTRY_RELEASE"
+echo "Finalizing Sentry release $SENTRY_RELEASE ..."
 sentry-cli releases finalize $SENTRY_RELEASE
 echo "Sentry release $SENTRY_RELEASE finalized."

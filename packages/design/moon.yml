@@ -1,6 +1,3 @@
 # yaml-language-server: $schema=../../.moon/cache/schemas/project.json
 
 layer: library
-language: typescript
-toolchain:
-  default: "unstable_node"

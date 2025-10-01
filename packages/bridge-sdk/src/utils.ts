@@ -5,28 +5,41 @@ import { fromList, pushHash } from "./actions"
 import { fetchActionsQuery } from "./graphql/queries/mina-archive"
 import type { Account, Action, Deposit, Withdrawal } from "./types"
 
+// The graphQL schema server will limit the block scan range to a fixed number of blocks.
+// https://github.com/o1-labs/Archive-Node-API/blob/2d726955502fbd02c70d388f589284dd838bbb45/src/server/server.ts#L13
+const BLOCK_RANGE_SIZE = 10_000
+
 export async function fetchActions(
 	client: Client,
 	pk: PublicKey,
 	actionStates?: Mina.ActionStates
 ): Promise<Action[]> {
-	const { data } = await client.query(fetchActionsQuery, {
-		pk: pk.toBase58(),
-		fromActionState: actionStates?.fromActionState?.toString() ?? null,
-		endActionState: actionStates?.endActionState?.toString() ?? null
-	})
-	const dataWithDefault = data?.actions.map((a) => ({
-		...a,
-		actionData: a?.actionData?.map((ad) => ({
-			...ad,
-			transactionInfo: ad?.transactionInfo ?? { status: "status", hash: "hash" }
-		})),
-		blockInfo: { timestamp: String(a?.blockInfo?.timestamp ?? "0") }
-	}))
-	const result = v.safeParse(
-		v.array(
+	const fetchActionsRecursive = async ({
+		fromBlock,
+		toBlock
+	}: { fromBlock?: number; toBlock?: number }) => {
+		const { data } = await client.query(fetchActionsQuery, {
+			pk: pk.toBase58(),
+			fromActionState: actionStates?.fromActionState?.toString() ?? null,
+			endActionState: actionStates?.endActionState?.toString() ?? null,
+			from: fromBlock ?? null,
+			to: toBlock ?? null
+		})
+		const dataWithDefault = data?.actions.map((a) => ({
+			...a,
+			actionData: a?.actionData?.map((ad) => ({
+				...ad,
+				transactionInfo: ad?.transactionInfo ?? { status: "status", hash: "hash" }
+			})),
+			blockInfo: {
+				timestamp: String(a?.blockInfo?.timestamp ?? "0"),
+				height: Number(a?.blockInfo?.height ?? 0)
+			}
+		}))
+
+		const schema = v.array(
 			v.object({
-				blockInfo: v.object({ timestamp: v.string() }),
+				blockInfo: v.object({ timestamp: v.string(), height: v.number() }),
 				actionState: v.object({
 					actionStateOne: v.string(),
 					actionStateTwo: v.string()
@@ -38,11 +51,22 @@ export async function fetchActions(
 					})
 				)
 			})
-		),
-		dataWithDefault
-	)
-	if (!result.success) throw new Error("Invalid actions data")
-	return result.output.flatMap(
+		)
+
+		const result = v.safeParse(schema, dataWithDefault)
+		if (!result.success) throw new Error("Invalid actions data")
+
+		if (result.output.length === 0) return result.output
+
+		const prevOutput: v.InferOutput<typeof schema> = await fetchActionsRecursive({
+			fromBlock: result.output[0].blockInfo.height - BLOCK_RANGE_SIZE
+		})
+		return [...prevOutput, ...result.output]
+	}
+
+	const output = await fetchActionsRecursive({})
+
+	return output.flatMap(
 		({
 			actionState: { actionStateTwo: actionStateBefore },
 			actionData,

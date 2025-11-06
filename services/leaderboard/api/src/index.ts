@@ -1,7 +1,14 @@
 import { createYoga } from "graphql-yoga"
+import * as v from "valibot"
+import type { BroadcastPayload } from "../module"
 import type { Context } from "./builder"
 import { type CloudflareContext, rc, useDatabase } from "./db"
 import { schema } from "./graphql"
+
+const BroadcastPayloadSchema = v.object({
+	maxBlockHeight: v.pipe(v.number(), v.integer(), v.minValue(0)),
+	hasNewEntries: v.boolean()
+}) satisfies v.GenericSchema<BroadcastPayload>
 
 const yoga = createYoga<{ cloudflare: CloudflareContext }>({
 	schema,
@@ -22,28 +29,57 @@ const yoga = createYoga<{ cloudflare: CloudflareContext }>({
 	}
 })
 
-const TOTAL_SHARDS = 100
+export const TOTAL_SHARDS = 5
 
 export default {
 	async fetch(request, env, context) {
 		const url = new URL(request.url)
 		if (url.pathname === "/broadcast") {
+			console.log("[/broadcast] Received broadcast request")
 			const auth = request.headers.get("Authorization")
-			if (auth !== `Bearer ${env.AUTH_TOKEN}`) return new Response("Unauthorized", { status: 401 })
-			const broadcastPromises = Array.from({ length: TOTAL_SHARDS }, async (_, shardId) => {
+			if (auth !== `Bearer ${env.AUTH_TOKEN}`) {
+				console.log("[/broadcast] Unauthorized request")
+				return new Response("Unauthorized", { status: 401 })
+			}
+
+			const body = await request.json()
+			const parseResult = v.safeParse(BroadcastPayloadSchema, body)
+
+			if (!parseResult.success) {
+				console.log("[/broadcast] Invalid payload:", parseResult.issues)
+				return Response.json(
+					{ error: "Invalid payload", issues: parseResult.issues },
+					{ status: 400 }
+				)
+			}
+
+			const { maxBlockHeight, hasNewEntries } = parseResult.output
+			const timestamp = Date.now()
+
+			const payload = {
+				type: "LEADERBOARD_UPDATE",
+				data: { maxBlockHeight, hasNewEntries },
+				timestamp
+			} as const
+
+			console.log("[/broadcast] Creating broadcast promises for", TOTAL_SHARDS, "shards", payload)
+			const broadcastPromises = Array.from({ length: TOTAL_SHARDS }, (_, shardId) => {
 				const shardName = `distributor-${shardId}`
 				const distributorId = env.DISTRIBUTOR_DO.idFromName(shardName)
 				const distributorStub = env.DISTRIBUTOR_DO.get(distributorId)
-
-				const payload = {
-					type: "LEADERBOARD_UPDATE",
-					data: { message: "Scores updated", timestamp: Date.now() },
-					timestamp: Date.now()
-				} as const
-
 				return distributorStub.broadcast(payload)
 			})
-			context.waitUntil(Promise.all(broadcastPromises))
+
+			context.waitUntil(
+				Promise.all(broadcastPromises)
+					.then((results) => {
+						console.log("[/broadcast] All broadcasts completed successfully:", results.length)
+					})
+					.catch((error) => {
+						console.error("[/broadcast] Broadcast failed:", error)
+					})
+			)
+
 			return new Response("OK")
 		}
 

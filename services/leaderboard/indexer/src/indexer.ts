@@ -7,7 +7,14 @@ import {
 	recalculateLeaderboard,
 	scoreConfig
 } from "./db"
-import { type ActionConfig, type ActionsConfig, broadcast, logger, wait } from "./helper"
+import {
+	type ActionConfig,
+	type ActionsConfig,
+	broadcast,
+	getMaxBlockHeight,
+	logger,
+	wait
+} from "./helper"
 import { handler as deposit } from "./points/deposit"
 import { handler as faucet } from "./points/faucet"
 import { handler as liquidity } from "./points/liquidity"
@@ -30,6 +37,7 @@ interface IndexerState {
 	moduleStates: Record<string, ModuleState>
 	config: IndexerConfig
 	consecutiveErrors: number
+	lastMaxBlockHeight?: number
 }
 
 type ModuleName = keyof ActionsConfig
@@ -84,34 +92,42 @@ const ACTION_TYPE_MAP = {
 async function fetchAllActions(moduleStates: Record<string, ModuleState>): Promise<{
 	actionsToInsert: ActionToInsert[]
 	updatedModuleStates: Record<string, ModuleState>
+	maxBlockHeight: number
 }> {
 	logger.box(`📡 Fetching all actions from their respective module states`)
 	logger.info("Module states:", moduleStates)
 	logger.info("Initiating parallel fetch across all point modules...")
 
-	const [depositResult, faucetResult, liquidityResult, swapResult, withdrawalResult] =
-		await Promise.all([
-			deposit.fetch({
-				startBlock: moduleStates.deposit.lastFetchedBlock,
-				endBlock: moduleStates.deposit.endBlock ?? Number.POSITIVE_INFINITY
-			}),
-			faucet.fetch({
-				startBlock: moduleStates.faucet.lastFetchedBlock,
-				endBlock: moduleStates.faucet.endBlock ?? Number.POSITIVE_INFINITY
-			}),
-			liquidity.fetch({
-				startBlock: moduleStates.liquidity.lastFetchedBlock,
-				endBlock: moduleStates.liquidity.endBlock ?? Number.POSITIVE_INFINITY
-			}),
-			swap.fetch({
-				startBlock: moduleStates.swap.lastFetchedBlock,
-				endBlock: moduleStates.swap.endBlock ?? Number.POSITIVE_INFINITY
-			}),
-			withdrawal.fetch({
-				startBlock: moduleStates.withdrawal.lastFetchedBlock,
-				endBlock: moduleStates.withdrawal.endBlock ?? Number.POSITIVE_INFINITY
-			})
-		])
+	const [
+		depositResult,
+		faucetResult,
+		liquidityResult,
+		swapResult,
+		withdrawalResult,
+		maxBlockHeight
+	] = await Promise.all([
+		deposit.fetch({
+			startBlock: moduleStates.deposit.lastFetchedBlock,
+			endBlock: moduleStates.deposit.endBlock ?? Number.POSITIVE_INFINITY
+		}),
+		faucet.fetch({
+			startBlock: moduleStates.faucet.lastFetchedBlock,
+			endBlock: moduleStates.faucet.endBlock ?? Number.POSITIVE_INFINITY
+		}),
+		liquidity.fetch({
+			startBlock: moduleStates.liquidity.lastFetchedBlock,
+			endBlock: moduleStates.liquidity.endBlock ?? Number.POSITIVE_INFINITY
+		}),
+		swap.fetch({
+			startBlock: moduleStates.swap.lastFetchedBlock,
+			endBlock: moduleStates.swap.endBlock ?? Number.POSITIVE_INFINITY
+		}),
+		withdrawal.fetch({
+			startBlock: moduleStates.withdrawal.lastFetchedBlock,
+			endBlock: moduleStates.withdrawal.endBlock ?? Number.POSITIVE_INFINITY
+		}),
+		getMaxBlockHeight("L2")
+	])
 
 	logger.success("✅ All modules fetched successfully")
 	logger.info("📊 Fetch results summary:", {
@@ -121,6 +137,8 @@ async function fetchAllActions(moduleStates: Record<string, ModuleState>): Promi
 		swap: `${swapResult.data.length} events (block ${swapResult.lastFetchedBlock})`,
 		withdrawal: `${withdrawalResult.data.length} events (block ${withdrawalResult.lastFetchedBlock})`
 	})
+
+	logger.info(`📏 Max L2 block height: ${maxBlockHeight}`)
 
 	// Update module states with new last fetched blocks, preserving endBlock
 	const updatedModuleStates = {
@@ -202,7 +220,7 @@ async function fetchAllActions(moduleStates: Record<string, ModuleState>): Promi
 	}
 
 	logger.success(`✅ Converted to ${actionsToInsert.length} total actions`)
-	return { actionsToInsert, updatedModuleStates }
+	return { actionsToInsert, updatedModuleStates, maxBlockHeight }
 }
 
 /**
@@ -220,27 +238,41 @@ async function runIndexingLoop(db: PostgresJsDatabase, state: IndexerState): Pro
 
 	try {
 		// Fetch all available actions recursively until no more events are found
-		const { actionsToInsert, updatedModuleStates } = await fetchAllActions(state.moduleStates)
+		const { actionsToInsert, updatedModuleStates, maxBlockHeight } = await fetchAllActions(
+			state.moduleStates
+		)
 
 		logger.info("🏁 Fetch complete for all modules")
 		logger.info(`💾 Ready to process ${actionsToInsert.length} actions`)
 
 		// Batch insert actions and update leaderboard
-		if (actionsToInsert.length > 0) {
+		const writeNewEntries = async () => {
+			if (actionsToInsert.length === 0) {
+				logger.info("⏭️  No new actions to process")
+				return false
+			}
+
 			logger.info("🔨 Inserting actions and updating leaderboard...")
-			const triggerBroadcast = await batchInsertActionsAndUpdateLeaderboard({
+			const result = await batchInsertActionsAndUpdateLeaderboard({
 				db,
 				actionsToInsert,
 				config: scoreConfig,
 				updateMode: "inserted" // Only update wallets with new actions
 			})
 			logger.success("✅ Database updated successfully")
-			if (triggerBroadcast) {
-				logger.info("📢 Triggering distributor broadcast...")
-				broadcast()
-			}
+			return result
+		}
+
+		const hasNewEntries = await writeNewEntries()
+
+		// Only broadcast when maxBlockHeight changes (store previous value in state)
+		const previousMaxBlockHeight = state.lastMaxBlockHeight ?? 0
+		if (maxBlockHeight !== previousMaxBlockHeight) {
+			logger.info("📢 Broadcasting to all connected clients...")
+			broadcast({ maxBlockHeight, hasNewEntries })
+			state.lastMaxBlockHeight = maxBlockHeight
 		} else {
-			logger.info("⏭️  No new actions to process")
+			logger.info("⏭️  No broadcast needed (maxBlockHeight unchanged)")
 		}
 
 		// ONLY update moduleStates on successful completion
@@ -300,9 +332,10 @@ export class Indexer {
 			},
 			consecutiveErrors: 0,
 			config: {
-				intervalSeconds: 2,
+				intervalSeconds: 5,
 				maxRetries: 5
-			}
+			},
+			lastMaxBlockHeight: undefined
 		}
 	}
 
@@ -455,8 +488,9 @@ export class Indexer {
 
 			// Step 2: Fetch all actions from blockchain starting from initialBlock
 			logger.info(`[Rebuild] Fetching all actions from configured blocks...`)
-			const { actionsToInsert, updatedModuleStates } = await fetchAllActions(initialModuleStates)
-			logger.info("[Rebuild] Fetched all events from blockchain")
+			const { actionsToInsert, updatedModuleStates, maxBlockHeight } =
+				await fetchAllActions(initialModuleStates)
+			logger.info(`[Rebuild] Fetched all events from blockchain (max block: ${maxBlockHeight})`)
 
 			if (actionsToInsert.length === 0)
 				throw new Error("No actions fetched from blockchain for rebuild")

@@ -1,24 +1,27 @@
 /*
  * DistributorDO and UserDo
- * There are 100 DistributorDO shards and many UserDOs.
  * Each user will be assigned a random ID and will connect to a unique DO instance.
- * Each UserDO subscribes to one of the 100 DistributorDO shards using consistent hashing.
+ * Each UserDO subscribes to one of the DistributorDO shards using consistent hashing.
  * The DistributorDO will broadcast updates to all subscribed UserDOs via RPC.
  */
 
 import { DurableObject } from "cloudflare:workers"
+import { TOTAL_SHARDS } from "./index"
 
 /**
  * Payload structure for broadcast messages
  */
-export interface BroadcastMessagePayload {
-	type: string
-	data: unknown
-	timestamp?: number
+export type BroadcastMessagePayload = {
+	type: "LEADERBOARD_UPDATE"
+	data: {
+		maxBlockHeight: number
+		hasNewEntries: boolean
+	}
+	timestamp: number
 }
 
 /**
- * DistributorDO - Fixed pool of 100 shards for fan-out distribution
+ * DistributorDO - Fixed pool of shards for fan-out distribution
  * Each shard maintains a list of subscribed UserDOs and broadcasts messages to them.
  */
 export class DistributorDO extends DurableObject<Env> {
@@ -62,7 +65,6 @@ export class DistributorDO extends DurableObject<Env> {
 	 */
 	async broadcast(payload: BroadcastMessagePayload) {
 		if (this.#subscribers.size === 0) {
-			console.log(`[DistributorDO:${this.#shardId}] No subscribers to broadcast to`)
 			return { success: true, deliveredCount: 0 }
 		}
 
@@ -201,7 +203,7 @@ export class UserDo extends DurableObject<Env> {
 	}
 
 	/**
-	 * Calculate which DistributorDO shard this user belongs to (0-99).
+	 * Calculate which DistributorDO shard this user belongs to.
 	 * Uses a simple hash function for consistent distribution.
 	 */
 	private calculateShardId(userId: string): number {
@@ -211,7 +213,7 @@ export class UserDo extends DurableObject<Env> {
 			hash = (hash << 5) - hash + char
 			hash = hash & hash // Convert to 32-bit integer
 		}
-		return Math.abs(hash) % 100
+		return Math.abs(hash) % TOTAL_SHARDS
 	}
 
 	/**

@@ -11,6 +11,8 @@
 	},
 	"dependencies": {
 		"@pothos/core": "catalog:graphql",
+		"@urql/core": "catalog:graphql",
+		"@zeko/graphql": "workspace:^",
 		"consola": "catalog:",
 		"drizzle-orm": "catalog:",
 		"graphql": "catalog:graphql",

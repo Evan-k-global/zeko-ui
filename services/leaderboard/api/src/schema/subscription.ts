@@ -1,6 +1,8 @@
+import { Client, fetchExchange } from "@urql/core"
 import { Repeater } from "graphql-yoga"
 import { builder } from "../builder"
 import type { BroadcastMessagePayload } from "../do"
+import { getMaxBlockHeightL2 } from "../helpers/utils"
 
 interface LeaderboardUpdateData {
 	maxBlockHeight: number
@@ -14,6 +16,11 @@ const LeaderboardUpdate = builder.objectRef<LeaderboardUpdateData>("LeaderboardU
 		hasNewEntries: t.exposeBoolean("hasNewEntries", { nullable: false }),
 		timestamp: t.exposeFloat("timestamp", { nullable: false })
 	})
+})
+
+const client = new Client({
+	url: "https://archive.testnet.zeko.io/graphql",
+	exchanges: [fetchExchange]
 })
 
 builder.subscriptionType({
@@ -39,7 +46,13 @@ builder.subscriptionType({
 				ws.accept()
 
 				return new Repeater<LeaderboardUpdateData>(async (push, stop) => {
+					ws.addEventListener("open", async () => {
+						const maxBlockHeight = await getMaxBlockHeightL2(client)
+						push({ maxBlockHeight, hasNewEntries: false, timestamp: Date.now() })
+					})
+
 					ws.addEventListener("message", async (message) => {
+						console.log(`[Subscription] ${userId} Received message:`, message.data.toString())
 						try {
 							const payload = JSON.parse(message.data.toString()) as BroadcastMessagePayload
 							if (payload.type === "LEADERBOARD_UPDATE") {

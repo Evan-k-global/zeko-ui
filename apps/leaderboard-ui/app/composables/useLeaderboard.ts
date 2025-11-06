@@ -76,25 +76,31 @@ export const useLeaderboard = defineStore("leaderboard", () => {
 		executeQuery()
 	}
 
-	const subscriptionPaused = ref(false)
-
 	const {
 		data: subscriptionData,
 		error: subscriptionError,
+		fetching: subscriptionFetching,
 		executeSubscription
 	} = useSubscription({
-		query: leaderboardUpdateSubscription,
-		pause: subscriptionPaused
+		query: leaderboardUpdateSubscription
 	})
 
+	// Handle subscription errors - retry after 2s
 	watch(subscriptionError, (error) => {
 		if (error) {
 			console.warn("[useLeaderboard] Subscription error, retrying in 2s:", error)
-			subscriptionPaused.value = true
 			setTimeout(() => {
-				subscriptionPaused.value = false
 				executeSubscription()
 			}, 2000)
+		}
+	})
+
+	// Handle subscription completion/disconnect - reconnect immediately
+	// When SSE stream ends, fetching goes from true to false
+	watch(subscriptionFetching, (isFetching, wasFetching) => {
+		if (wasFetching && !isFetching && !subscriptionError.value) {
+			console.log("[useLeaderboard] Subscription completed/disconnected, reconnecting...")
+			executeSubscription()
 		}
 	})
 

@@ -89,5 +89,7 @@ tasks:
       - "@group(tests)"
   deploy:
     command: wrangler deploy
+    deps: [^:build]
   deploy-preview:
     command: wrangler versions upload
+    deps: [^:build]

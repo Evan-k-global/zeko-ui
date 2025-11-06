@@ -73,7 +73,7 @@ export default {
 			context.waitUntil(
 				Promise.all(broadcastPromises)
 					.then((results) => {
-						console.log("[/broadcast] All broadcasts completed successfully:", results.length)
+						console.log("[/broadcast] All broadcasts completed successfully:", results)
 					})
 					.catch((error) => {
 						console.error("[/broadcast] Broadcast failed:", error)

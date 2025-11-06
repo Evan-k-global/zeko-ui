@@ -1,7 +1,12 @@
-import type { BroadcastPayload } from "@leaderboard/api"
+import {
+	type BroadcastPayload,
+	type Client,
+	fetchEventsRaw,
+	getMaxBlockHeightL2
+} from "@leaderboard/api"
 import { createMinaClient } from "@lumina-dex/sdk"
 import { networkStateQuery } from "@zeko/graphql/mina-archive"
-import { FetchZekoArchiveEvents } from "@zeko/graphql/zeko-archive"
+import type { FetchZekoArchiveEvents } from "@zeko/graphql/zeko-archive"
 import { createConsola } from "consola"
 import type { ResultOf } from "gql.tada"
 import { Field, PublicKey } from "o1js"
@@ -67,33 +72,6 @@ type Layer = "L1" | "L2"
 const l2Client = createMinaClient("https://archive.testnet.zeko.io/graphql")
 const l1Client = createMinaClient("https://api.minascan.io/archive/devnet/v1/graphql")
 
-async function fetchEventsRaw({
-	address,
-	from,
-	to,
-	layer
-}: { address: string; from?: number; to?: number; layer: Layer }) {
-	const input = {
-		address,
-		status: "CANONICAL" as const,
-		...(from !== undefined && { from }),
-		...(to !== undefined && { to })
-	}
-
-	const { data, error } = await (layer === "L1" ? l1Client : l2Client).query(
-		FetchZekoArchiveEvents,
-		{ input }
-	)
-
-	if (error) {
-		logger.error("GraphQL error:", error)
-		throw error
-	}
-	if (!data?.events) throw new Error("No events data returned from archive")
-
-	return data.events
-}
-
 /**
  * Get the current maximum block height of the chain.
  *
@@ -101,21 +79,8 @@ async function fetchEventsRaw({
  */
 export async function getMaxBlockHeight(layer: Layer): Promise<number> {
 	if (layer === "L2") {
-		//TODO: We're using a query that should always return data.
-		const query = await fetchEventsRaw({
-			address: addresses.L2.FAUCET_ZEKO_TMINA,
-			from: 1,
-			to: 10,
-			layer
-		})
-
-		if (query.length === 0) throw new Error("No events found to determine max block height")
-
-		const firstEvent = query[0]
-		if (!firstEvent?.blockInfo) throw new Error("Query returned events without blockInfo")
-
-		const { height, distanceFromMaxBlockHeight } = firstEvent.blockInfo
-		return height + distanceFromMaxBlockHeight
+		const blocks = await getMaxBlockHeightL2(l2Client as Client)
+		return blocks
 	}
 	const state = await l1Client.query(networkStateQuery, {})
 	if (state.error) throw new Error(`Network state query error: ${state.error.message}`)
@@ -162,8 +127,8 @@ async function fetchEventsRecursive(options: FetchEventsRecursiveOptions): Promi
 	}
 
 	logger.info(`${logPrefix} Fetching blocks ${currentFrom}-${currentTo}`)
-
-	const events = await fetchEventsRaw({ address, from: currentFrom, to: currentTo, layer })
+	const client = (layer === "L2" ? l2Client : l1Client) as Client
+	const events = await fetchEventsRaw({ address, from: currentFrom, to: currentTo, client })
 	const allEvents = accumulated.concat(events)
 
 	logger.info(
@@ -304,6 +269,12 @@ export function broadcast(payload: BroadcastPayload) {
 				"Content-Type": "application/json"
 			},
 			body: JSON.stringify(payload)
+		}).then((response) => {
+			if (!response.ok) {
+				logger.error(`[broadcast] Broadcast request failed with status ${response.status}`)
+			} else {
+				logger.info(`[broadcast] Broadcast request succeeded with status ${response.status}`)
+			}
 		})
 		return { success: true }
 	} catch (error) {

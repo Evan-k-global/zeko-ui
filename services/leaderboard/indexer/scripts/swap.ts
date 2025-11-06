@@ -1,12 +1,13 @@
-import { logger } from "../src/helper"
+import { getMaxBlockHeight, logger } from "../src/helper"
 import { handler as swap } from "../src/points/swap"
 
 async function main() {
-	logger.info("🔍 Fetching swap events from block 0 to now...")
+	const startBlock = 0
+	logger.info(`🔍 Fetching swap events from block ${startBlock} to now...`)
 
 	try {
-		const result = await swap.fetch({ startBlock: 0, endBlock: Number.POSITIVE_INFINITY })
-
+		const result = await swap.fetch({ startBlock, endBlock: Number.POSITIVE_INFINITY })
+		const maxBlockHeight = await getMaxBlockHeight("L2")
 		logger.success(`✅ Fetch completed successfully`)
 		logger.info(`📊 Last fetched block: ${result.lastFetchedBlock}`)
 		logger.info(`📝 Total swap events found: ${result.data.length}`)
@@ -30,7 +31,8 @@ async function main() {
 		const uniqueSenders = new Set(result.data.map((event) => event.sender))
 		console.log(`Total events: ${result.data.length}`)
 		console.log(`Unique senders: ${uniqueSenders.size}`)
-		console.log(`Block range: 0 - ${result.lastFetchedBlock}`)
+		console.log(`Last Fetched Block: ${result.lastFetchedBlock}`)
+		console.log(`Block range: ${startBlock} - ${maxBlockHeight}`)
 	} catch (error) {
 		logger.error("❌ Error fetching swap events:", error)
 		throw error

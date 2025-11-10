@@ -7,7 +7,7 @@ export default defineNuxtConfig({
 	compatibilityDate: "2025-07-15",
 	devServer: { port: 3069 },
 	modules: ["@nuxt/fonts", "@pinia/nuxt", "@hebilicious/nuxt-switch-match", "nitro-cloudflare-dev"],
-	devtools: { enabled: true },
+	devtools: { enabled: false },
 	extends: ["@zeko/layer"],
 	postcss: {
 		plugins: {
@@ -30,7 +30,15 @@ export default defineNuxtConfig({
 	nitro: { preset: "cloudflare-module", minify: false },
 	runtimeConfig: {
 		public: {
-			graphqlEndpoint: "https://api.leaderboard.zeko.io/graphql"
+			graphqlEndpoint: "https://api.leaderboard.zeko.io/graphql",
+			links: {
+				docs: "https://docs.zeko.io",
+				auroWallet: "https://www.aurowallet.com",
+				faucet: "https://zeko.io/faucet",
+				zekoBridge: "https://alpha.bridge.zeko.io/",
+				solisDex: "https://solis.gizmolab.io/",
+				lumina: "https://beta.luminadex.com/"
+			}
 		}
 	}
 })

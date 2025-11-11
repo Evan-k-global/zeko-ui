@@ -1,27 +1,34 @@
-import {
-	type ActionConfig,
-	type ArchiveEvents,
-	addresses,
-	fetchArchiveEvents,
-	getPubK,
-	logger
-} from "../helper"
+import { type ArchiveEvents, addresses, fetchArchiveEvents, getPubK, logger } from "../helper"
+
+// ReceiveMinaEvent
+// [ "3", "7994353054957568193498626604873088658666758397914343032172656113958151515402",
+//          "0", "1000000000"
+//        ]
+// SwapEvent
+// [ "4", "7994353054957568193498626604873088658666758397914343032172656113958151515402",
+//           "0", "1000000000", "240787553"
+//         ]
 
 const processSwapEvents = async (events: ArchiveEvents) => {
 	const parse = (data: string[], timestamp: string, transactionHash: string) => {
 		const pubk = getPubK(data)
-		return {
-			sender: pubk(1, 2),
-			amountToken0In: data[3],
-			amountToken1In: data[4],
-			amountLiquidityOut: data[5],
-			timestamp,
-			transactionHash
-		}
+		return data[0] === "3"
+			? {
+					sender: pubk(1, 2),
+					amountMinaIn: data[3],
+					timestamp,
+					transactionHash
+				}
+			: {
+					sender: pubk(1, 2),
+					amountIn: data[3],
+					amountOut: data[4],
+					timestamp,
+					transactionHash
+				}
 	}
 	const swapData = events
-		//TODO: Verify event is #4
-		.filter((e) => e?.eventData?.[0]?.data[0] === "4")
+		.filter((e) => e?.eventData?.[0]?.data[0] === "4" || e?.eventData?.[0]?.data[0] === "3")
 		.map((e) =>
 			parse(
 				e?.eventData?.[0]?.data.filter(Boolean) ?? [],
@@ -41,7 +48,7 @@ export const score = {
 } as const
 
 export const handler = {
-	fetch: async ({ startBlock, endBlock }: ActionConfig) => {
+	fetch: async ({ startBlock, endBlock }: { startBlock: number; endBlock: number }) => {
 		logger.info(
 			`[${score.key}] Starting fetch from block ${startBlock}${endBlock !== Number.POSITIVE_INFINITY ? ` to ${endBlock}` : ""}`
 		)
@@ -55,6 +62,7 @@ export const handler = {
 		})
 
 		logger.info(`[${score.key}] Processing ${events.length} raw events`)
+		// console.dir(events, { depth: null })
 		const data = await processSwapEvents(events)
 		logger.success(`[${score.key}] Processed ${data.length} swap events`)
 

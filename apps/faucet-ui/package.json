@@ -1,0 +1,27 @@
+{
+	"name": "@zeko/faucet-ui",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"postinstall": "nuxt prepare"
+	},
+	"dependencies": {
+		"@ark-ui/vue": "catalog:",
+		"@unhead/vue": "catalog:",
+		"@vueuse/core": "catalog:",
+		"@xstate/vue": "catalog:",
+		"@zeko/design": "workspace:^",
+		"@zeko/layer": "workspace:^",
+		"arktype": "^2.1.0",
+		"lucide-vue-next": "catalog:",
+		"nuxt": "catalog:",
+		"vue": "catalog:",
+		"xstate": "catalog:"
+	},
+	"devDependencies": {
+		"@csstools/postcss-global-data": "catalog:",
+		"@total-typescript/ts-reset": "catalog:",
+		"nitro-cloudflare-dev": "catalog:",
+		"wrangler": "catalog:"
+	}
+}

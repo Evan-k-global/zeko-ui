@@ -16,17 +16,24 @@ import {
 	hashWithPrefix
 } from "../node_modules/o1js/dist/node/lib/provable/crypto/poseidon"
 
-export async function sendPayment({
-	address,
-	privateKey,
-	amount,
-	publicKey
-}: {
-	address: string
-	privateKey: PrivateKey
-	amount: bigint
-	publicKey: PublicKey
-}) {
+const INITIAL_FEE = 0.1 * 1e9
+const FEE_INCREMENT = 0.1 * 1e9
+const MAX_FEE = 1 * 1e9
+
+export async function sendPayment(
+	{
+		address,
+		privateKey,
+		amount,
+		publicKey
+	}: {
+		address: string
+		privateKey: PrivateKey
+		amount: bigint
+		publicKey: PublicKey
+	},
+	fee: UInt64 = UInt64.from(INITIAL_FEE)
+) {
 	const claimer = PublicKey.fromBase58(address)
 
 	const faucetAccount = await fetchAccount({ publicKey: publicKey })
@@ -34,7 +41,7 @@ export async function sendPayment({
 
 	const feePayer = {
 		sender: publicKey,
-		fee: 0.1 * 1e9,
+		fee,
 		nonce
 	} satisfies Mina.FeePayerSpec
 
@@ -69,11 +76,9 @@ export async function sendPayment({
 	try {
 		return await tx.sign([privateKey]).send()
 	} catch (error) {
-		console.warn("Error sending transaction, trying with higher fee", error)
+		if (fee.greaterThan(UInt64.from(MAX_FEE))) throw error
 
-		return await tx
-			.setFee(UInt64.from(0.5 * 1e9))
-			.sign([privateKey])
-			.send()
+		console.warn("Error sending transaction, trying with higher fee", error)
+		return await sendPayment({ address, privateKey, amount, publicKey }, fee.add(FEE_INCREMENT))
 	}
 }

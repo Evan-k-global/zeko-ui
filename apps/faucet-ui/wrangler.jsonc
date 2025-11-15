@@ -14,7 +14,10 @@
 		"binding": "ASSETS"
 	},
 	"observability": {
-		"enabled": true
+		"enabled": true,
+		"traces": {
+			"enabled": true
+		}
 	},
 	"secrets_store_secrets": [
 		{
@@ -33,6 +36,16 @@
 		{
 			"pattern": "faucet.zeko.io",
 			"custom_domain": true
+		}
+	],
+	"ratelimits": [
+		{
+			"name": "RATE_LIMIT_FAUCET",
+			"namespace_id": "100",
+			"simple": {
+				"limit": 3,
+				"period": 60
+			}
 		}
 	]
 }

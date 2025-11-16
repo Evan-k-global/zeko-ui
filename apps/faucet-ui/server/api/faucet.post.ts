@@ -1,31 +1,6 @@
 import { type } from "arktype"
 import { faucetBody } from "~~/helpers/validation"
-
-const validateBody = type({ address: "string.alphanumeric", cfToken: "string" })
-
-async function verifyTurnstile({
-	token,
-	ip,
-	secret
-}: { token: string; secret: string; ip: string }): Promise<boolean> {
-	try {
-		const verifyEndpoint = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
-
-		const response = await fetch(verifyEndpoint, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ secret, response: token, remoteip: ip })
-		})
-
-		const data = (await response.json()) as { success: boolean }
-		if (data.success) return true
-		console.error("Turnstile verification response:", data)
-		return false
-	} catch (error) {
-		console.error("Error verifying Turnstile token:", error)
-		return false
-	}
-}
+import { getSpamState, validateBody, verifyTurnstile } from "../utils"
 
 export default defineEventHandler(async (event) => {
 	// Validate body
@@ -37,7 +12,7 @@ export default defineEventHandler(async (event) => {
 		getHeader(event, "x-forwarded-for") ||
 		getHeader(event, "x-real-ip") ||
 		"unknown"
-
+	console.log(`Faucet request: IP[${ip}], Address[${body.address}]`)
 	const { env } = event.context.cloudflare
 
 	// Verify Turnstile
@@ -46,7 +21,6 @@ export default defineEventHandler(async (event) => {
 		secret: env.TURNSTILE_SECRET_KEY,
 		ip
 	})
-
 	if (!isVerified) {
 		console.error("Turnstile verification failed for IP:", ip)
 		return Response.json(
@@ -58,9 +32,34 @@ export default defineEventHandler(async (event) => {
 	// IP rate limiting
 	const { success } = await env.RATE_LIMIT_FAUCET.limit({ key: ip })
 	if (!success) {
+		console.warn("IP rate limit blocked", ip)
 		return Response.json(
 			{ message: "Too many requests from this IP address. Please try again later." },
 			{ status: 429 }
+		)
+	}
+
+	// IP Ban
+	const banned = await env.FAUCET_BANNED_IPS.get(ip)
+	if (banned) {
+		console.warn("Blocked request from banned IP", ip)
+		return Response.json(
+			{ message: "Your IP address has been temporarily blocked due to abuse." },
+			{ status: 403 }
+		)
+	}
+
+	// Spam
+	const { spam, spamThreshold, spamWindow } = await getSpamState({ ip, env })
+	if (spam > spamThreshold) {
+		const banTtl = Number.parseInt(env.BAN_TTL_SECONDS ?? String(60 * 60 * 24), 10) //24 hours
+		await env.FAUCET_BANNED_IPS.put(ip, new Date().toISOString(), { expirationTtl: banTtl })
+		console.warn(
+			`Auto-banned IP ${ip} for exceeding ${spamThreshold} requests in the last ${spamWindow} seconds`
+		)
+		return Response.json(
+			{ message: "Your IP address has been temporarily blocked due to abuse." },
+			{ status: 403 }
 		)
 	}
 
@@ -78,8 +77,10 @@ export default defineEventHandler(async (event) => {
 			return Response.json({ message: "An unexpected error has occurred." }, { status: 400 })
 
 		// Already claimed
-		if (faucetData.message.includes("claimed"))
+		if (faucetData.message.includes("claimed")) {
+			console.warn("Address already claimed", body.address)
 			return Response.json({ message: "This address has already claimed tokens." }, { status: 403 })
+		}
 
 		// Sequencer down (502)
 		if (faucetData.message.includes("sequencer is currently unavailable"))
@@ -94,7 +95,7 @@ export default defineEventHandler(async (event) => {
 			return Response.json({ message: faucetData.message }, { status: 400 })
 		}
 
-		console.log("Faucet successful response")
+		console.log("Faucet successful response for %s (%s)", body.address, ip)
 		return Response.json(faucetData, { status: 202 })
 	} catch (error) {
 		console.error("Error processing faucet response:", error)

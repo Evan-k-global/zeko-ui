@@ -29,18 +29,19 @@ const urls = {
 		testnet: {
 			zekoUrl: "https://testnet.zeko.io/graphql",
 			zekoArchiveUrl: "https://archive.testnet.zeko.io/graphql"
-		},
-		actionsApi: "http://api.actions.zeko.io/"
+		}
+	},
+	actions: {
+		//TODO: Configure for mainnet
+		mainnet: "https://api.actions.zeko.io/graphql",
+		testnet: "https://api.actions.zeko.io/graphql"
 	}
 } as const
 
-export const getBridgeConfig = ({
-	l1,
-	l2,
-	actionsApi
-}: { l1: Networks; l2: Networks; actionsApi: string }) => {
+export const getBridgeConfig = ({ l1, l2 }: { l1: Networks; l2: Networks }) => {
 	const l1Urls = l1.includes("mainnet") ? urls.l1.mainnet : urls.l1.testnet
 	const l2Urls = l2.includes("mainnet") ? urls.l2.mainnet : urls.l2.testnet
+	const actionsApi = l2.includes("mainnet") ? urls.actions.mainnet : urls.actions.testnet
 	return {
 		...l1Urls,
 		...l2Urls,

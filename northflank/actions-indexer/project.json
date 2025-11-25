@@ -198,7 +198,7 @@
                               ],
                               "prRestrictions": [],
                               "pathIgnoreRules": [
-                                "/services/leaderboard/indexer/"
+                                "/services/actions/indexer/"
                               ],
                               "ciIgnoreFlags": [
                                 "[skip ci]",

@@ -10,32 +10,33 @@ import {
 	submitWithdrawalMutation
 } from "@zeko/graphql/zeko"
 import { AccountUpdate, Field, Mina, PublicKey, TokenId, type Types, UInt32, UInt64 } from "o1js"
-import type { Client } from "urql"
 import * as v from "valibot"
 import { fromList, pushAction } from "./actions"
-import { createGraphqlClient } from "./graphql"
+import { createGraphqlClient, type GqlClient } from "./graphql"
 import type {
 	Config,
 	Deposit,
 	DepositWithState,
-	InnerAction,
-	InnerActionWithState,
 	InnerWitness,
 	OuterCommit,
 	OuterWitness,
-	Withdrawal
+	Withdrawal,
+	WithdrawalWithState
 } from "./types"
 import {
 	BRIDGE_DEPLOY_BLOCK,
 	depositAux,
 	fetchActions,
-	fetchActionsFromIndexer,
-	fetchCommitAsePastWithdrawalDelay,
-	fetchWitnessesFromAuxes,
+	fetchCommitAsePastSlot,
+	fetchInnerActionsFromIndexer,
+	fetchInnerWitnessesFromAuxes,
+	fetchOuterActionsFromIndexer,
+	fetchOuterWitnessesFromAuxes,
 	filterNulls,
 	getNextDepositIndex,
 	getNextWithdrawalIndex,
 	refreshCache,
+	safeDecrement,
 	withdrawalAux
 } from "./utils"
 
@@ -47,11 +48,11 @@ export class Bridge {
 	constructor(
 		private readonly config: Config,
 
-		private readonly l1Client: Client,
-		private readonly l1ArchiveClient: Client,
-		private readonly l2Client: Client,
-		private readonly l2ArchiveClient: Client,
-		private readonly actionsApiClient: Client,
+		private readonly l1Client: GqlClient,
+		private readonly l1ArchiveClient: GqlClient,
+		private readonly l2Client: GqlClient,
+		private readonly l2ArchiveClient: GqlClient,
+		private readonly actionsApiClient: GqlClient,
 
 		public readonly l1AccountCreationFee: UInt64,
 		public readonly l2AccountCreationFee: UInt64,
@@ -66,18 +67,18 @@ export class Bridge {
 	) {}
 
 	static async init(config: Config): Promise<Bridge> {
-		const l1Client = createGraphqlClient(config.l1Url)
-		const l1ArchiveClient = createGraphqlClient(config.l1ArchiveUrl)
-		const actionsApiClient = createGraphqlClient(config.actionsApi)
-		const l2Client = createGraphqlClient(config.zekoUrl)
-		const l2ArchiveClient = createGraphqlClient(config.zekoArchiveUrl)
+		const l1Client = createGraphqlClient(config.l1Url, "l1")
+		const l1ArchiveClient = createGraphqlClient(config.l1ArchiveUrl, "l1-archive")
+		const actionsApiClient = createGraphqlClient(config.actionsApi, "actions-api")
+		const l2Client = createGraphqlClient(config.zekoUrl, "l2")
+		const l2ArchiveClient = createGraphqlClient(config.zekoArchiveUrl, "l2-archive")
 
 		const [fetchConfigResult, genesisConstantL2Result, genesisConstantL1Result, sequencerPkResult] =
 			await Promise.all([
-				l2Client.query(fetchConfigQuery, {}),
-				l2Client.query(genesisConstantsQueryL2, {}),
-				l1Client.query(genesisConstantsQueryL1, {}),
-				l2Client.query(sequencerPkQuery, {})
+				l2Client().query(fetchConfigQuery, {}),
+				l2Client().query(genesisConstantsQueryL2, {}),
+				l1Client().query(genesisConstantsQueryL1, {}),
+				l2Client().query(sequencerPkQuery, {})
 			])
 
 		const circuitsConfig = fetchConfigResult.data?.circuitsConfig
@@ -132,7 +133,7 @@ export class Bridge {
 	}
 
 	public async fetchCurrentSlot(): Promise<UInt32> {
-		const { data } = await this.l1Client.query(runtimeConfigQuery, {})
+		const { data } = await this.l1Client().query(runtimeConfigQuery, {})
 
 		const result = v.safeParse(
 			v.object({
@@ -151,11 +152,11 @@ export class Bridge {
 	}
 
 	private async fetchAccount(
-		client: Client,
+		client: GqlClient,
 		pk: PublicKey,
 		tokenId?: Field
 	): Promise<{ zkappState: string[] | null } | null> {
-		const { data } = await client.query(accountQuery, {
+		const { data } = await client().query(accountQuery, {
 			pk: pk.toBase58(),
 			tokenId: tokenId ? TokenId.toBase58(tokenId) : null
 		})
@@ -232,23 +233,6 @@ export class Bridge {
 		)
 	}
 
-	private async fetchInnerActions(): Promise<InnerAction[]> {
-		const actions = await fetchActions(this.l2ArchiveClient, this.innerPk)
-
-		return actions.map(
-			({ index, beforeActionState, afterActionState, action, hash, timestamp }) => {
-				if (action[0].equals(0).toBoolean()) {
-					return {
-						type: "witness",
-						aux: action[1],
-						action: { index, beforeActionState, afterActionState, action, hash, timestamp }
-					}
-				}
-				throw new Error("Invalid inner action type")
-			}
-		)
-	}
-
 	private async pollQuery(key: string, pollPeriod = 5_000) {
 		let provedForest: string | null = null
 		let attempts = 0
@@ -261,7 +245,7 @@ export class Bridge {
 			await new Promise((resolve) => setTimeout(resolve, pollPeriod))
 			attempts++
 
-			const resultResponse = await this.l2Client.query(provedForestQuery, { key })
+			const resultResponse = await this.l2Client().query(provedForestQuery, { key })
 			if (resultResponse.error) throw resultResponse.error
 			provedForest = resultResponse.data?.provedForest ?? null
 		}
@@ -299,7 +283,7 @@ export class Bridge {
 			])
 		})
 
-		const { data } = await this.l2Client.mutation(submitDepositMutation, {
+		const { data } = await this.l2Client().mutation(submitDepositMutation, {
 			depositParams: {
 				recipient: recipient.toBase58(),
 				amount: amount.toString(),
@@ -344,7 +328,7 @@ export class Bridge {
 
 		if (deposits.length === 0) return null
 
-		const depositWitnesses = await fetchWitnessesFromAuxes(
+		const depositWitnesses = await fetchOuterWitnessesFromAuxes(
 			this.actionsApiClient,
 			deposits.map(({ aux }) => aux.toString())
 		)
@@ -357,7 +341,7 @@ export class Bridge {
 
 		if (earliestBeforeState === undefined) return null
 
-		const outerActions = await fetchActionsFromIndexer(this.actionsApiClient, {
+		const outerActions = await fetchOuterActionsFromIndexer(this.actionsApiClient, {
 			fromState: earliestBeforeState.toString()
 		})
 
@@ -460,7 +444,7 @@ export class Bridge {
 
 			const { witness, depositParams, helperAccount, aseTarget } = witnesses
 
-			const { data } = await this.l2Client.mutation(finalizeDepositMutation, {
+			const { data } = await this.l2Client().mutation(finalizeDepositMutation, {
 				input: witness
 			})
 
@@ -536,7 +520,7 @@ export class Bridge {
 			])
 		})
 
-		const { data } = await this.l2Client.mutation(submitWithdrawalMutation, {
+		const { data } = await this.l2Client().mutation(submitWithdrawalMutation, {
 			input: {
 				recipient: recipient.toBase58(),
 				amount: amount.toString(),
@@ -561,22 +545,49 @@ export class Bridge {
 
 		const prevNextWithdrawal = helperAccount ? getNextWithdrawalIndex(helperAccount) : UInt32.zero
 
-		const innerActions = await this.fetchInnerActions()
-
 		const withdrawals = (await this.fetchUserWithdrawals(pk)).map((withdrawal) => ({
 			withdrawal,
 			aux: withdrawalAux(withdrawal)
 		}))
 
+		if (withdrawals.length === 0) return null
+
+		const withdrawalWitnesses = await fetchInnerWitnessesFromAuxes(
+			this.actionsApiClient,
+			withdrawals.map(({ aux }) => aux.toString())
+		)
+
+		if (withdrawalWitnesses.length === 0) return null
+
+		const earliestBeforeState = withdrawalWitnesses
+			.sort((a, b) => a.index - b.index)
+			.at(0)?.beforeActionState
+
+		if (earliestBeforeState === undefined) return null
+
+		const currentSlot = await this.fetchCurrentSlot()
+
+		const { commit: lastCommit, ase } = await fetchCommitAsePastSlot(
+			this.actionsApiClient,
+			+currentSlot.sub(this.withdrawalDelay)
+		)
+
+		const lastCommitAse = ase.map(({ action }) => fromList([action]).hash)
+
+		const innerActions = await fetchInnerActionsFromIndexer(this.actionsApiClient, {
+			fromState: earliestBeforeState.toString(),
+			afterState: lastCommit.innerActionState.toString()
+		})
+
 		const findMatchingWithdrawal = (action: InnerWitness) =>
 			withdrawals.find(({ aux }) => aux.equals(action.aux).toBoolean())
 
-		const myWithdrawalIndex = innerActions.findIndex((action, index) => {
+		const myWithdrawalIndex = innerActions.findIndex((action) => {
 			const matchingWithdrawal = findMatchingWithdrawal(action)
 
 			if (!matchingWithdrawal) return false
 
-			if (prevNextWithdrawal.greaterThan(UInt32.from(index)).toBoolean()) return false
+			if (prevNextWithdrawal.greaterThan(UInt32.from(action.index)).toBoolean()) return false
 
 			return true
 		})
@@ -587,25 +598,9 @@ export class Bridge {
 		const withdrawalParams = findMatchingWithdrawal(myWithdrawal)
 		if (!withdrawalParams) throw new Error("Unreachable: Did not find withdrawal parameters")
 
-		const currentSlot = await this.fetchCurrentSlot()
-
-		const { commit: lastCommit, ase } = await fetchCommitAsePastWithdrawalDelay(
-			this.actionsApiClient,
-			+this.withdrawalDelay.add(currentSlot)
-		)
-
-		const lastCommitAse = ase.map(({ action }) => fromList([action]).hash)
-
-		const syncedInnerActionStateIndex = innerActions.findIndex(({ action }) =>
-			action.afterActionState.equals(lastCommit.innerActionState).toBoolean()
-		)
-
-		if (syncedInnerActionStateIndex === -1 || syncedInnerActionStateIndex < myWithdrawalIndex)
-			return null
-
 		const withdrawalAse = innerActions
-			.slice(myWithdrawalIndex + 1, syncedInnerActionStateIndex + 1)
-			.map(({ action }) => fromList([action.action]).hash)
+			.slice(myWithdrawalIndex + 1)
+			.map(({ action }) => fromList([action]).hash)
 
 		return {
 			withdrawalParams,
@@ -621,11 +616,11 @@ export class Bridge {
 					fields: withdrawalAse.map((elem) => elem.toString()),
 					stmt: {
 						length: lastCommit.innerActionStateLength.sub(withdrawalAse.length).toString(),
-						actionState: myWithdrawal.action.afterActionState.toString()
+						actionState: myWithdrawal.afterActionState.toString()
 					}
 				},
 				beforeWithdrawal: {
-					actionState: myWithdrawal.action.beforeActionState.toString()
+					actionState: myWithdrawal.beforeActionState.toString()
 				},
 				commitAse: {
 					fields: lastCommitAse.map((elem) => elem.toString()),
@@ -652,7 +647,7 @@ export class Bridge {
 
 		const { witness, withdrawalParams, helperAccount } = witnesses
 
-		const { data } = await this.l2Client.mutation(finalizeWithdrawalMutation, {
+		const { data } = await this.l2Client().mutation(finalizeWithdrawalMutation, {
 			input: witness
 		})
 		if (!data?.request?.key) throw new Error("No key returned from mutation")
@@ -701,7 +696,7 @@ export class Bridge {
 			auxesMap.set(depositAux(deposit).toBigInt(), deposit)
 		}
 
-		const depositWitnesses = await fetchWitnessesFromAuxes(
+		const depositWitnesses = await fetchOuterWitnessesFromAuxes(
 			this.actionsApiClient,
 			auxes.map((x) => x.toString())
 		)
@@ -717,7 +712,7 @@ export class Bridge {
 
 		const currentSlot = await this.fetchCurrentSlot()
 
-		const { commit: lastCommit } = await fetchCommitAsePastWithdrawalDelay(
+		const { commit: lastCommit } = await fetchCommitAsePastSlot(
 			this.actionsApiClient,
 			+currentSlot.sub(this.withdrawalDelay)
 		)
@@ -739,118 +734,61 @@ export class Bridge {
 					finalised: nextDeposit.greaterThanOrEqual(UInt32.from(witness.index + 1)).toBoolean()
 				}
 			}),
-			syncedIndex: 0,
+			syncedIndex: +safeDecrement(syncedOuterActionState.length).toString(),
 			acceptedIndex: lastCommit.index,
-			confirmedIndex: 0,
-			finalisedIndex: 0
-			//TODO: Find out why this is not working (Error: rangeCheck32: expected field to fit in 32 bits, got 28948022309329048855892746252171976963363056481941560715954676764349967630336)
-			// syncedIndex: +syncedOuterActionState.length.sub(1).toString(),
-			// acceptedIndex: lastCommit.index,
-			// confirmedIndex: +lastCommit.synchronizedOuterActionStateLength.sub(1).toString(),
-			// finalisedIndex: +nextDeposit.sub(1).toString()
+			confirmedIndex: +safeDecrement(lastCommit.synchronizedOuterActionStateLength).toString(),
+			finalisedIndex: +safeDecrement(nextDeposit).toString()
 		}
 	}
-	public async fetchInnerActionsWithStates(_pk: PublicKey): Promise<InnerActionWithState[]> {
-		return []
-		// const withdrawals = await this.fetchUserWithdrawals(pk)
-		// const auxesMap = new Map<bigint, Withdrawal>()
-		// for (const withdrawal of withdrawals) {
-		// 	const aux = withdrawalAux(withdrawal)
-		// 	auxesMap.set(aux.toBigInt(), withdrawal)
-		// }
 
-		// const helperAccount = await this.fetchAccount(
-		// 	this.l1Client,
-		// 	pk,
-		// 	TokenId.derive(this.outerTokenOwner)
-		// )
-		// const nextWithdrawal = helperAccount ? getNextWithdrawalIndex(helperAccount) : UInt32.zero
+	public async fetchWithdrawalsWithStates(pk: PublicKey): Promise<{
+		withdrawals: WithdrawalWithState[]
+		committedIndex: number
+		finalisedIndex: number
+	}> {
+		const withdrawals = await this.fetchUserWithdrawals(pk)
 
-		// const innerActions: MaybeWithdrawal[] = (await this.fetchInnerActions()).map(
-		// 	(action, index) => {
-		// 		const withdrawal = auxesMap.get(action.aux.toBigInt())
-		// 		return {
-		// 			...action,
-		// 			withdrawal: withdrawal
-		// 				? {
-		// 						...withdrawal,
-		// 						finalised: nextWithdrawal.greaterThan(UInt32.from(index)).toBoolean()
-		// 					}
-		// 				: undefined
-		// 		}
-		// 	}
-		// )
+		const auxes = withdrawals.map(withdrawalAux)
 
-		// const outerActions = await this.fetchOuterActions()
-		// const reversedOuterActions = outerActions.slice().reverse()
+		const auxesMap = new Map<bigint, Withdrawal>()
+		for (const withdrawal of withdrawals) {
+			auxesMap.set(withdrawalAux(withdrawal).toBigInt(), withdrawal)
+		}
 
-		// const reversedLastCommitIndex = reversedOuterActions.findIndex(
-		// 	(action) => action.type === "commit"
-		// )
-		// const lastCommitIndex =
-		// 	reversedLastCommitIndex === -1 ? -1 : outerActions.length - reversedLastCommitIndex - 1
+		const withdrawalWitnesses = await fetchInnerWitnessesFromAuxes(
+			this.actionsApiClient,
+			auxes.map((x) => x.toString())
+		)
 
-		// if (lastCommitIndex === -1)
-		// 	return innerActions.map((action) => ({
-		// 		...action,
-		// 		committed: false,
-		// 		isPastWithdrawalDelay: false
-		// 	}))
+		const helperAccount = await this.fetchAccount(
+			this.l1Client,
+			pk,
+			TokenId.derive(this.outerTokenOwner)
+		)
+		const nextWithdrawal = helperAccount ? getNextWithdrawalIndex(helperAccount) : UInt32.zero
 
-		// const lastCommit = outerActions[lastCommitIndex] as OuterCommit
+		const currentSlot = await this.fetchCurrentSlot()
 
-		// if (lastCommit.innerActionStateLength.equals(UInt32.zero).toBoolean()) {
-		// 	return innerActions.map((action) => ({
-		// 		...action,
-		// 		committed: false,
-		// 		isPastWithdrawalDelay: false
-		// 	}))
-		// }
+		const { commit: lastCommit } = await fetchCommitAsePastSlot(
+			this.actionsApiClient,
+			+currentSlot.sub(this.withdrawalDelay)
+		)
 
-		// const lastCommittedInnerIndex = lastCommit.innerActionStateLength.sub(1)
-
-		// const innerActionsMaybeCommitted: (MaybeWithdrawal & {
-		// 	committed: boolean
-		// })[] = innerActions.map((action, index) => {
-		// 	if (lastCommittedInnerIndex.greaterThanOrEqual(UInt32.from(index)).toBoolean())
-		// 		return { ...action, committed: true }
-		// 	return { ...action, committed: false }
-		// })
-
-		// const reversedLastPastDelayCommit = reversedOuterActions.findIndex(
-		// 	(action) => action.type === "commit" && action.isPastWithdrawalDelay
-		// )
-		// const lastPastDelayCommitIndex =
-		// 	reversedLastPastDelayCommit === -1
-		// 		? -1
-		// 		: outerActions.length - reversedLastPastDelayCommit - 1
-
-		// if (lastPastDelayCommitIndex === -1)
-		// 	return innerActionsMaybeCommitted.map((action) => ({
-		// 		...action,
-		// 		isPastWithdrawalDelay: false
-		// 	}))
-
-		// const lastPastDelayCommit = outerActions[lastPastDelayCommitIndex] as OuterCommit
-
-		// if (lastPastDelayCommit.innerActionStateLength.equals(UInt32.zero).toBoolean()) {
-		// 	return innerActionsMaybeCommitted.map((action) => ({
-		// 		...action,
-		// 		isPastWithdrawalDelay: false
-		// 	}))
-		// }
-
-		// const lastPastDelayIndex = lastPastDelayCommit.innerActionStateLength.sub(1)
-
-		// const innerActionsMaybePastDelay: (MaybeWithdrawal & {
-		// 	committed: boolean
-		// 	isPastWithdrawalDelay: boolean
-		// })[] = innerActionsMaybeCommitted.map((action, index) => {
-		// 	if (lastPastDelayIndex.greaterThanOrEqual(UInt32.from(index)).toBoolean())
-		// 		return { ...action, isPastWithdrawalDelay: true }
-		// 	return { ...action, isPastWithdrawalDelay: false }
-		// })
-
-		// return innerActionsMaybePastDelay
+		return {
+			withdrawals: withdrawalWitnesses.map((witness) => {
+				const withdrawal = auxesMap.get(witness.aux.toBigInt())
+				if (!withdrawal) throw new Error("Unreachable: Did not find withdrawal")
+				return {
+					...witness,
+					...withdrawal,
+					committed: lastCommit.innerActionStateLength
+						.greaterThan(UInt32.from(witness.index))
+						.toBoolean(),
+					finalised: nextWithdrawal.greaterThanOrEqual(UInt32.from(witness.index + 1)).toBoolean()
+				}
+			}),
+			committedIndex: +safeDecrement(lastCommit.innerActionStateLength).toString(),
+			finalisedIndex: +safeDecrement(nextWithdrawal).toString()
+		}
 	}
 }

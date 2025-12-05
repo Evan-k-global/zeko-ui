@@ -1,18 +1,20 @@
+import type { innerActions, outerActions } from "@zeko/actions-api"
 import { createGraphqlClient, fromList, pushHash } from "@zeko/bridge-sdk"
 import { fetchActionsQuery, networkStateQuery } from "@zeko/graphql/mina-archive"
 import { createConsola } from "consola"
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js"
 import { Field } from "o1js"
 import * as v from "valibot"
 import { env } from "./env"
+import type { InnerItem } from "./modules/inner"
+import type { OuterItem } from "./modules/outer"
 
 export const logger = createConsola({
 	level: env.ENVIRONMENT?.toLowerCase() === "local" ? 4 : 3
 }).withTag("ACTIONS_INDEXER")
 
-export const OUTER_PK = "B62qkekmS9273D1EsFfMSJMMDAmgvh1WyoYE2vs1r7k4GtGBqVYABn2"
-export const l1Client = createGraphqlClient(env.L1_ARCHIVE_URL)
-
-const firstBlockWithActions = 430_000
+export const l1Client = createGraphqlClient(env.L1_ARCHIVE_URL, "l1-archive")
+export const l2Client = createGraphqlClient(env.L2_ARCHIVE_URL, "l2-archive")
 
 export interface ArchiveActionData {
 	data: string[]
@@ -38,21 +40,23 @@ const BLOCK_RANGE_SIZE = 10_000
 
 export async function fetchActions({
 	client,
-	fromBlock
+	fromBlock,
+	pk
 }: {
 	client: ReturnType<typeof createGraphqlClient>
 	fromBlock?: number
+	pk: string
 }): Promise<ArchiveEvent[]> {
-	logger.info(`[fetchActions] starting fetch; fromBlock=${fromBlock ?? "latest"}`)
-	logger.debug(
-		`[fetchActions] using OUTER_PK=${OUTER_PK} archiveUrl=${env.L1_ARCHIVE_URL ?? "unset"}`
-	)
+	logger.info(`[fetchActions ${client.label}] starting fetch; fromBlock=${fromBlock ?? "latest"}`)
+	logger.debug(`[fetchActions ${client.label}] using ${pk}`)
 	// Ensure we fetch in batches from 'from' to tip
-	const start = Math.max(fromBlock ?? 0, firstBlockWithActions)
+	const start = fromBlock ?? 1
 	const maxHeight = await getNetworkTip(client)
-	logger.info(`[fetchActions] network tip: ${maxHeight}, start: ${start}`)
+	logger.info(`[fetchActions ${client.label}] network tip: ${maxHeight}, start: ${start}`)
 	if (start > maxHeight) {
-		logger.info(`[fetchActions] start (${start}) > network tip (${maxHeight}), returning empty`)
+		logger.info(
+			`[fetchActions ${client.label}] start (${start}) > network tip (${maxHeight}), returning empty`
+		)
 		return []
 	}
 
@@ -61,20 +65,20 @@ export async function fetchActions({
 	while (from <= maxHeight) {
 		// "to" is exclusive, so we add 1 to the maxHeight
 		const to = Math.min(from + BLOCK_RANGE_SIZE, maxHeight + 1)
-		logger.debug(`[fetchActions] querying archive for range ${from}-${to}`)
-		const res = await client.query(fetchActionsQuery, {
-			pk: OUTER_PK,
+		logger.debug(`[fetchActions ${client.label}] querying archive for range ${from}-${to}`)
+		const res = await client().query(fetchActionsQuery, {
+			pk,
 			from: from,
 			to: to
 		})
 		const { data, error } = res
 		if (error) {
-			logger.error(`[fetchActions] query error: ${String(error)}`)
+			logger.error(`[fetchActions ${client.label}] query error: ${String(error)}`)
 			throw error
 		}
 		const rawActions = (data?.actions ?? []).filter((a) => a != null)
 		logger.info(
-			`[fetchActions] archive returned ${rawActions.length} raw actions for range ${from}-${to}`
+			`[fetchActions ${client.label}] archive returned ${rawActions.length} raw actions for range ${from}-${to}`
 		)
 		if (rawActions.length > 0) {
 			const heights = rawActions.map((a) => Number(a.blockInfo?.height ?? 0))
@@ -82,11 +86,11 @@ export async function fetchActions({
 			const maxH = Math.max(...heights)
 			if (minH < from)
 				logger.warn(
-					`[fetchActions] archive returned block below requested from: min=${minH} < from=${from}`
+					`[fetchActions ${client.label}] archive returned block below requested from: min=${minH} < from=${from}`
 				)
 			if (maxH > to)
 				logger.warn(
-					`[fetchActions] archive returned block above requested to: max=${maxH} > to=${to}`
+					`[fetchActions ${client.label}] archive returned block above requested to: max=${maxH} > to=${to}`
 				)
 			const firstAction = rawActions[0]
 			const lastAction = rawActions[rawActions.length - 1]
@@ -94,11 +98,13 @@ export async function fetchActions({
 			const lastHash =
 				lastAction?.actionData?.[lastAction.actionData?.length - 1]?.transactionInfo?.hash ??
 				"<no-hash>"
-			logger.debug(`[fetchActions] range ${from}-${to} firstHash=${firstHash} lastHash=${lastHash}`)
+			logger.debug(
+				`[fetchActions ${client.label}] range ${from}-${to} firstHash=${firstHash} lastHash=${lastHash}`
+			)
 		}
 		if (rawActions.length === 0) {
 			logger.debug(
-				`[fetchActions] range ${from}-${to} returned 0 actions; continuing to next range`
+				`[fetchActions ${client.label}] range ${from}-${to} returned 0 actions; continuing to next range`
 			)
 		}
 		const dataWithDefault: ArchiveAction[] = rawActions.map((a) => ({
@@ -136,7 +142,7 @@ export async function fetchActions({
 		)
 		const result = v.safeParse(schema, dataWithDefault)
 		if (!result.success) {
-			logger.error("Invalid actions data:", result.issues)
+			logger.error(`[fetchActions ${client.label}] Invalid actions data: ${result.issues}`)
 			throw new Error("Invalid actions data")
 		}
 		blocks.push(...result.output)
@@ -145,13 +151,14 @@ export async function fetchActions({
 
 	const output = blocks
 	logger.info(
-		`[fetchActions] total blocks collected: ${output.length}, start=${start}, tip=${maxHeight}`
+		`[fetchActions ${client.label}] total blocks collected: ${output.length}, start=${start}, tip=${maxHeight}`
 	)
 	logger.info(
-		`[fetchActions] total action blocks fetched: ${output.length}. fromBlock requested: ${fromBlock ?? "latest"}`
+		`[fetchActions ${client.label}] total action blocks fetched: ${output.length}. fromBlock requested: ${fromBlock ?? "latest"}`
 	)
-	if (output.length === 0) logger.warn(`[fetchActions] No actions found for fromBlock=${fromBlock}`)
-	logger.info("[fetchActions] hashing started")
+	if (output.length === 0)
+		logger.warn(`[fetchActions ${client.label}] No actions found for fromBlock=${fromBlock}`)
+	logger.info(`[fetchActions ${client.label}] hashing started`)
 	const startHashing = Date.now()
 	const result = output.flatMap(
 		({
@@ -181,7 +188,7 @@ export async function fetchActions({
 
 			if (!correctActions.at(-1)?.afterActionState.equals(actionStateAfter).toBoolean()) {
 				throw new Error(
-					`[fetchActions] invalid actions sequence: last action afterActionState=${correctActions.at(-1)?.afterActionState.toString()} !== actionStateAfter=${actionStateAfter.toString()}`
+					`[fetchActions ${client.label}] invalid actions sequence: last action afterActionState=${correctActions.at(-1)?.afterActionState.toString()} !== actionStateAfter=${actionStateAfter.toString()}`
 				)
 			}
 
@@ -189,15 +196,15 @@ export async function fetchActions({
 		}
 	)
 
-	logger.info(`[fetchActions] hashing took ${Date.now() - startHashing}ms`)
-	logger.info(`[fetchActions] fetched actions length: ${result.length}`)
+	logger.info(`[fetchActions ${client.label}] hashing took ${Date.now() - startHashing}ms`)
+	logger.info(`[fetchActions ${client.label}] fetched actions length: ${result.length}`)
 
 	for (let i = 0; i < result.length; i++) {
 		const prev = i >= 0 ? result[i - 1] : undefined
 		const curr = result[i]
 		if (prev && !prev.afterActionState.equals(curr.beforeActionState).toBoolean()) {
 			throw new Error(
-				`[fetchActions] invalid actions sequence: index=${i} prev.afterActionState=${prev?.afterActionState.toString()} !== curr.beforeActionState=${curr.beforeActionState.toString()}`
+				`[fetchActions ${client.label}] invalid actions sequence: index=${i} prev.afterActionState=${prev?.afterActionState.toString()} !== curr.beforeActionState=${curr.beforeActionState.toString()}`
 			)
 		}
 	}
@@ -208,13 +215,82 @@ export async function fetchActions({
 export async function getNetworkTip(
 	client: ReturnType<typeof createGraphqlClient>
 ): Promise<number> {
-	const res = await client.query(networkStateQuery, {})
+	const res = await client().query(networkStateQuery, {})
 	if (res.error) throw res.error
 	const height = res.data?.networkState?.maxBlockHeight?.pendingMaxBlockHeight ?? 0
-	logger.info(`[getNetworkTip] pendingMaxBlockHeight=${height}`)
+	logger.info(`[getNetworkTip ${client.label}] pendingMaxBlockHeight=${height}`)
 	return height
 }
 
 export async function wait(seconds: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, seconds * 1000))
+}
+
+export async function handleFork<
+	FetchedAction extends OuterItem | InnerItem,
+	DbAction extends typeof outerActions.$inferSelect | typeof innerActions.$inferSelect,
+	DataToInsert
+>(
+	db: PostgresJsDatabase,
+	{
+		startBlock,
+		fetchActions,
+		getDbActions,
+		build,
+		deleteFromIndex,
+		insert,
+		lastFinalIndex
+	}: {
+		startBlock: number
+		fetchActions: (
+			startBlock: number
+		) => Promise<{ data: FetchedAction[]; lastFetchedBlock: number }>
+		getDbActions: (db: PostgresJsDatabase, startBlock: number) => Promise<DbAction[]>
+		lastFinalIndex: number
+		build: (items: FetchedAction[], currIndex: number) => DataToInsert
+		deleteFromIndex: (db: PostgresJsDatabase, index: number) => Promise<void>
+		insert: (db: PostgresJsDatabase, data: DataToInsert) => Promise<void>
+	}
+) {
+	const fetchedActions = await fetchActions(startBlock)
+	const dbActions = await getDbActions(db, startBlock)
+
+	let currentIndex = lastFinalIndex
+	let forkAtIndex = null
+	let insertFromIndex = null
+
+	for (let i = 0; i < fetchedActions.data.length; i++) {
+		const item = fetchedActions.data[i]
+		const dbItem = i > dbActions.length ? undefined : dbActions[i]
+		currentIndex++
+
+		if (dbItem && dbItem.afterState !== item.afterState && !forkAtIndex) {
+			logger.info(
+				`[handleFork] fork at index ${currentIndex}: ${dbItem.afterState} -> ${item.afterState}`
+			)
+			forkAtIndex = currentIndex
+		}
+
+		if (forkAtIndex || !dbItem) {
+			insertFromIndex = i
+			break
+		}
+	}
+
+	const data = build(fetchedActions.data.slice(insertFromIndex ?? Number.MAX_VALUE), currentIndex)
+
+	if (forkAtIndex) {
+		// Rollback DB to the detected fork
+		await db.transaction(async (tx) => {
+			await deleteFromIndex(tx, forkAtIndex)
+			await insert(tx, data)
+		})
+	} else {
+		// Insert new events normally (ensure parent action rows are inserted before their children)
+		await db.transaction(async (tx) => {
+			await insert(tx, data)
+		})
+	}
+
+	return fetchedActions
 }

@@ -648,6 +648,8 @@ export class Bridge {
 			UInt32.from(myDeposit.index),
 			depositParams.deposit
 		)
+		// const currentSlot = await this.fetchCurrentSlot()
+		// console.debug("Info", { currentSlot, params: depositParams.deposit })
 
 		if (!isRejected || isAccepted) {
 			return { ok: false, msg: "Not rejected or accepted" }
@@ -772,7 +774,9 @@ export class Bridge {
 	}
 
 	public async canCancelDeposit(pk: PublicKey): Promise<boolean> {
-		return (await this.fetchDepositCancellationWitnesses(pk, this.outerTokenOwner)).ok
+		const result = await this.fetchDepositCancellationWitnesses(pk, this.outerTokenOwner)
+		console.debug("canCancelDeposit result:", result)
+		return result.ok
 	}
 
 	public async submitWithdrawal(

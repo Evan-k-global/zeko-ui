@@ -1,11 +1,16 @@
 <script lang="ts" setup>
 const bs = useBridgeStore()
+const bridgeSettings = useBridgeSettings()
 
 const amountToBridge = ref<number | undefined>(undefined)
 
 const startBridge = () => {
 	const amount = (amountToBridge.value ?? 0).toString()
-	bs.bridge.send({ type: "StartOperation", amount })
+	bs.bridge.send({
+		type: "StartOperation",
+		amount,
+		timeoutSlots: bridgeSettings.timeoutSlots.value
+	})
 	amountToBridge.value = undefined
 }
 const loading = computed(() => !bs.bridge.snapshot.matches("READY"))
@@ -84,6 +89,7 @@ const disabledButton = computed(
   }
 }
 
+/* biome-ignore lint/correctness/noUnknownPseudoClass: reason */
 :deep(.InputBox) {
   display: grid;
   grid-template-columns: 20ch 1fr;

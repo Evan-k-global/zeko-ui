@@ -100,17 +100,23 @@ watch(machine.value.context.errors, (newErrors) => {
               	type: "RequestNetworkChange",
               	network: machine.context.changeNetworkTo
               })
-            '>Change Network</Button>
+            '>
+            Change Network
+          </Button>
           <Button
             v-else-if="canCancel || cancelling"
             variant="cancel"
             :disabled="cancelling"
-            @click='operation.send({ type: "Cancel" })'>Cancel</Button>
+            @click='operation.send({ type: "Cancel" })'>
+            Cancel
+          </Button>
           <Button
             v-else
             variant="main"
             :disabled="!toFinalize"
-            @click='operation.send({ type: "Finalize" })'>Claim</Button>
+            @click='operation.send({ type: "Finalize" })'>
+            Claim
+          </Button>
         </div>
         <div class="Explanation">
           <template v-if='machine.matches("INIT_BRIDGE_OPERATION")'>
@@ -227,13 +233,11 @@ watch(machine.value.context.errors, (newErrors) => {
 
           <template v-else-if='machine.matches("FAILED")'>
             <div class="error">
+              <p>Something went wrong.</p>
               <p>
-                Something went wrong.
-              </p>
-              <p>
-                Don't worry, your funds are safe. <a
-                  href="https://discord.gg/vSDxqAchUY"
-                  target="_blank">Contact us on Discord</a>.
+                Don't worry, your funds are safe.
+                <a href="https://discord.gg/vSDxqAchUY" target="_blank">Contact
+                  us on Discord</a>.
               </p>
             </div>
           </template>
@@ -327,7 +331,8 @@ watch(machine.value.context.errors, (newErrors) => {
 }
 
 .error {
-  &, a {
+  &,
+  a {
     color: var(--palette-persianRed-600);
   }
 }

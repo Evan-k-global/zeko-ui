@@ -14,7 +14,7 @@ if (import.meta.client) {
 	Sentry.addIntegration(Sentry.webWorkerIntegration({ worker }))
 }
 
-const { act, logger } = createLogger("[BRIDGE]")
+const { act, logger } = createLogger("[BRIDGE]", { metrics: true })
 
 type OperationStatus = "started" | "paused" | "completed"
 type Operations = Map<
@@ -98,19 +98,23 @@ export const bridgeMachine = setup({
 		bridgeOperationMachine,
 		detectWalletChange,
 		findPendingOperations: fromPromise<PendingOperations, PendingOperationsInput>(({ input }) => {
-			return act("findPendingOperation", async () => {
-				const { wallet, worker, sourceNetwork, destinationNetwork } = input
-				const account = wallet.getSnapshot().context.account
-				if (account.length === 0) throw new Error("No account found in the wallet")
-				const l1 = sourceNetwork.includes("mina") ? sourceNetwork : destinationNetwork
-				const l2 = sourceNetwork.includes("zeko") ? sourceNetwork : destinationNetwork
+			const { wallet, worker, sourceNetwork, destinationNetwork } = input
+			const account = wallet.getSnapshot().context.account
+			return act(
+				"findPendingOperation",
+				async () => {
+					if (account.length === 0) throw new Error("No account found in the wallet")
+					const l1 = sourceNetwork.includes("mina") ? sourceNetwork : destinationNetwork
+					const l2 = sourceNetwork.includes("zeko") ? sourceNetwork : destinationNetwork
 
-				const result = await worker.findPendingOperations({ account, l1, l2 })
-				console.log(
-					`Found ${result.deposits.length} deposits and ${result.withdrawals.length} withdrawals`
-				)
-				return result
-			})
+					const result = await worker.findPendingOperations({ account, l1, l2 })
+					console.log(
+						`Found ${result.deposits.length} deposits and ${result.withdrawals.length} withdrawals`
+					)
+					return result
+				},
+				account
+			)
 		})
 	},
 	actions: {
@@ -286,7 +290,6 @@ export const bridgeMachine = setup({
 							})
 						}
 					}
-					// Assign data
 					enqueue.assign({ sourceNetwork, destinationNetwork })
 				})
 			}

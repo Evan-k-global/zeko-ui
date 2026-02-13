@@ -158,9 +158,13 @@ const visiblePages = computed(() => {
               </Label>
             </td>
             <!-- From -->
-            <td><NetworkBadge :network="row.original.source" /></td>
+            <td>
+              <NetworkBadge :network="row.original.source" />
+            </td>
             <!-- To -->
-            <td><NetworkBadge :network="row.original.destination" /></td>
+            <td>
+              <NetworkBadge :network="row.original.destination" />
+            </td>
             <!-- Amount -->
             <td>
               <div class="AmountBox">
@@ -240,11 +244,13 @@ table {
   border-collapse: collapse;
 }
 
-th, td {
+th,
+td {
   text-align: left;
 }
 
-thead th, tbody td {
+thead th,
+tbody td {
   padding-inline: 1rem;
   padding-block: 0.5rem;
   border-bottom: 1px solid var(--bridge-border-color);

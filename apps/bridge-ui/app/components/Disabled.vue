@@ -77,16 +77,12 @@ onMounted(async () => {
         Download and install the Auro Wallet extension to use the Rollup Bridge.
       </p>
       <a href="https://www.aurowallet.com" target="_blank">
-        <Button variant="auro">
-          Download AuroWallet
-        </Button>
+        <Button variant="auro">Download AuroWallet</Button>
       </a>
     </template>
     <template v-else-if="notConnected">
       <p>Please connect your wallet to start bridging.</p>
-      <Button
-        variant="main"
-        @click='bs.wallet.send({ type: "Connect" })'>
+      <Button variant="main" @click='bs.wallet.send({ type: "Connect" })'>
         Connect Wallet
       </Button>
     </template>

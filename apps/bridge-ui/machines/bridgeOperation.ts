@@ -18,10 +18,11 @@ import {
 import { finalizeNotification } from "../app/service-worker/notificationList"
 import type { BridgeContext, BridgeEvents } from "./bridge"
 import { createLogger } from "./debug"
+import { sendMetric } from "./metrics"
 import type { ActionState } from "./operations.worker"
 import { type Result, transactionMachine } from "./transaction"
 
-const { act, logger, measure } = createLogger("[BRIDGE OPERATION]")
+const { act, logger, measure } = createLogger("[BRIDGE OPERATION]", { metrics: true })
 
 const bridgeParameters = ({ bridge, user, l1, l2 }: BridgeOperationContext) => {
 	return { bridge, user, l1, l2 }
@@ -163,11 +164,15 @@ export const bridgeOperationMachine = setup({
 		transactionMachine,
 		submitDeposit: fromPromise<string, BridgeWorker & { amount: string; timeoutSlots?: number }>(
 			({ input }) => {
-				return act("submitDeposit", async () => {
-					const { bridge, l1, l2, amount, user, timeoutSlots } = input
-					const tx = await worker(bridge).submitDeposit({ l1, l2, user, amount, timeoutSlots })
-					return tx
-				})
+				return act(
+					"submitDeposit",
+					async () => {
+						const { bridge, l1, l2, amount, user, timeoutSlots } = input
+						const tx = await worker(bridge).submitDeposit({ l1, l2, user, amount, timeoutSlots })
+						return tx
+					},
+					input.user
+				)
 			}
 		),
 		pendingDeposit: fromCallback<EventObject, BridgeWorker & { depositTimestamp?: Date }>(
@@ -202,18 +207,26 @@ export const bridgeOperationMachine = setup({
 			}
 		),
 		finalizeDeposit: fromPromise<string, BridgeWorker>(({ input }) => {
-			return act("finalizeDeposit", async () => {
-				const { bridge, l1, l2, user } = input
-				const tx = await worker(bridge).finalizeDeposit({ l1, l2, user })
-				return tx
-			})
+			return act(
+				"finalizeDeposit",
+				async () => {
+					const { bridge, l1, l2, user } = input
+					const tx = await worker(bridge).finalizeDeposit({ l1, l2, user })
+					return tx
+				},
+				input.user
+			)
 		}),
 		submitWithdrawal: fromPromise<string, BridgeWorker & { amount: string }>(({ input }) => {
-			return act("submitWithdrawal", async () => {
-				const { bridge, l1, l2, amount, user } = input
-				const tx = await worker(bridge).submitWithdrawal({ l1, l2, user, amount })
-				return tx
-			})
+			return act(
+				"submitWithdrawal",
+				async () => {
+					const { bridge, l1, l2, amount, user } = input
+					const tx = await worker(bridge).submitWithdrawal({ l1, l2, user, amount })
+					return tx
+				},
+				input.user
+			)
 		}),
 		pendingWithdrawal: fromCallback<EventObject, BridgeWorker>(({ sendBack, input }) => {
 			const label = "pendingWithdrawal"
@@ -241,18 +254,26 @@ export const bridgeOperationMachine = setup({
 			}
 		}),
 		finalizeWithdrawal: fromPromise<string, BridgeWorker>(({ input }) => {
-			return act("finalizeWithdrawal", async () => {
-				const { bridge, l1, l2, user } = input
-				const tx = await worker(bridge).finalizeWithdrawal({ l1, l2, user })
-				return tx
-			})
+			return act(
+				"finalizeWithdrawal",
+				async () => {
+					const { bridge, l1, l2, user } = input
+					const tx = await worker(bridge).finalizeWithdrawal({ l1, l2, user })
+					return tx
+				},
+				input.user
+			)
 		}),
 		cancelDeposit: fromPromise<string, BridgeWorker>(({ input }) => {
-			return act("cancelDeposit", async () => {
-				const { bridge, l1, l2, user } = input
-				const tx = await worker(bridge).cancelDeposit({ l1, l2, user })
-				return tx
-			})
+			return act(
+				"cancelDeposit",
+				async () => {
+					const { bridge, l1, l2, user } = input
+					const tx = await worker(bridge).cancelDeposit({ l1, l2, user })
+					return tx
+				},
+				input.user
+			)
 		})
 	},
 	guards: {
@@ -330,12 +351,35 @@ export const bridgeOperationMachine = setup({
 	states: {
 		IDLE: {
 			on: {
-				Resume: { target: "RESUMING", actions: assign({ paused: ({ event }) => event.paused }) },
-				Pause: { target: "PAUSED", actions: assign({ paused: true }) },
+				Resume: {
+					target: "RESUMING",
+					actions: assign({ paused: ({ event }) => event.paused })
+				},
+				Pause: {
+					target: "PAUSED",
+					actions: assign({ paused: true })
+				},
 				CompleteBridgeOperation: { target: "BRIDGE_OPERATION_DONE_NOOP" },
 				CompleteBridgeOperationCancelled: { target: "BRIDGE_OPERATION_CANCELLED_DONE" },
 				StartBridgeOperation: [
-					{ target: "INIT_BRIDGE_OPERATION", guard: "currentNetworkIsSource" },
+					{
+						target: "INIT_BRIDGE_OPERATION",
+						guard: "currentNetworkIsSource",
+						actions: ({ context }) => {
+							const amount = Number(context.amount)
+							sendMetric(
+								{
+									category: "bridge_operation",
+									action: "started",
+									amount: Number.isNaN(amount) ? 0 : amount,
+									source: context.source,
+									destination: context.destination,
+									label: context.direction
+								},
+								context.user
+							)
+						}
+					},
 					{
 						target: "WAITING_FOR_NETWORK",
 						guard: "currentNetworkIsDestination",
@@ -522,6 +566,17 @@ export const bridgeOperationMachine = setup({
 			meta: { step: 1 },
 			description:
 				"The deposit can be cancelled because the timeout has passed and it was not finalized.",
+			entry: ({ context }) => {
+				sendMetric(
+					{
+						category: "bridge_operation",
+						action: "canCancel",
+						source: context.source,
+						destination: context.destination
+					},
+					context.user
+				)
+			},
 			on: {
 				Cancel: [
 					{
@@ -795,6 +850,18 @@ export const bridgeOperationMachine = setup({
 		},
 		BRIDGE_OPERATION_COMPLETED: {
 			meta: { step: 4 },
+			entry: ({ context }) => {
+				sendMetric(
+					{
+						category: "bridge_operation",
+						action: "completed",
+						source: context.source,
+						destination: context.destination,
+						label: context.direction
+					},
+					context.user
+				)
+			},
 			after: { exitTimeout: "BRIDGE_OPERATION_DONE" }
 		},
 		BRIDGE_OPERATION_DONE: {
@@ -817,6 +884,22 @@ export const bridgeOperationMachine = setup({
 			meta: { step: 4 },
 			type: "final"
 		},
-		FAILED: { type: "final" }
+		FAILED: {
+			type: "final",
+			entry: ({ context }) => {
+				const lastError = context.errors.at(-1)
+				sendMetric(
+					{
+						category: "bridge_operation",
+						action: "failed",
+						source: context.source,
+						destination: context.destination,
+						success: false,
+						label: lastError?.message ?? "unknown error"
+					},
+					context.user
+				)
+			}
+		}
 	}
 })

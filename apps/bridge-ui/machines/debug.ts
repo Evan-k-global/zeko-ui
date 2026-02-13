@@ -1,4 +1,6 @@
 import { type ConsolaInstance, createConsola } from "consola"
+import { sendMetric } from "./metrics"
+import type { MetricEvent } from "./metrics.schema"
 
 // biome-ignore lint/suspicious/noExplicitAny: <explanation>
 const safeProcess = (globalThis as any).process || { env: {} }
@@ -46,24 +48,74 @@ const createMeasure = (l: ConsolaInstance) => (label: string) => {
 	}
 }
 
+const prefixToCategory = (prefix: string): MetricEvent["category"] =>
+	prefix
+		.replace(/^\[/, "")
+		.replace(/\]$/, "")
+		.trim()
+		.toLowerCase()
+		.replace(/\s+/g, "_") as MetricEvent["category"]
+
+type CreateLoggerOptions = { metrics?: boolean }
+
 /**
- * Helper function to measure and log the time taken to execute an action.
+ * Creates a prefixed logger with optional metric tracking.
+ *
+ * @param prefix - Logger prefix (e.g., "[BRIDGE]", "[TRANSACTION]")
+ * @param options.metrics - Enable automatic metric tracking via sendMetric()
+ *
+ * When metrics are enabled, the act() function automatically sends:
+ * - durationMs: Action execution time
+ * - success: true/false
+ * - label: Error message on failure
+ * - category: Derived from prefix (e.g., "[BRIDGE OPERATION]" → "bridge_operation")
  */
-export const createLogger = (prefix: string) => {
+export const createLogger = (prefix: string, options?: CreateLoggerOptions) => {
 	const logger = prefixedLogger(prefix)
 	const measure = createMeasure(logger)
+	const metricsEnabled = options?.metrics === true
+	const category = prefixToCategory(prefix)
 
-	const act = async <T>(label: string, body: ({ stop }: { stop: () => void }) => Promise<T>) => {
+	const act = async <T>(
+		label: string,
+		body: ({ stop }: { stop: () => void }) => Promise<T>,
+		walletAddress: string | undefined
+	) => {
+		const start = performance.now()
 		const stop = measure(label)
 		logger.start(label)
 		try {
 			const result = await body({ stop })
 			logger.success(label)
 			stop()
+			if (metricsEnabled) {
+				sendMetric(
+					{
+						category,
+						action: label,
+						durationMs: performance.now() - start,
+						success: true
+					},
+					walletAddress
+				)
+			}
 			return result
 		} catch (e) {
 			logger.error(`${label} Error:`, e)
 			stop()
+			if (metricsEnabled) {
+				const errorLabel = e instanceof Error ? e.message : String(e)
+				sendMetric(
+					{
+						category,
+						action: label,
+						durationMs: performance.now() - start,
+						success: false,
+						label: errorLabel
+					},
+					walletAddress
+				)
+			}
 			throw e
 		}
 	}

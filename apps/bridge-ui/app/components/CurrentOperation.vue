@@ -1,6 +1,11 @@
 <script lang="ts" setup>
 import type { ActorRefFromLogic } from "xstate"
-import { errorToaster, statePath, statusFromState, steps } from "~/helpers"
+import {
+	errorToaster,
+	progressFromState,
+	statePath,
+	statusFromState
+} from "~/helpers"
 import type { bridgeOperationMachine } from "~~/machines/bridgeOperation"
 import { useSelector } from "~~/machines/vue-xstate"
 
@@ -9,7 +14,7 @@ const { operation } = defineProps<{
 }>()
 const machine = useSelector(operation, (state) => state)
 
-const step = computed(() => {
+const machineStep = computed(() => {
 	// Special case for `WAITING_FOR_NETWORK` state
 	if (machine.value.matches("WAITING_FOR_NETWORK")) {
 		if (!machine.value.context.returnTo) return 0
@@ -24,6 +29,13 @@ const step = computed(() => {
 	const meta = machine.value.getMeta()
 	return meta[statePath(machine.value.value)]?.step ?? 0
 })
+const uiProgress = computed(() =>
+	progressFromState({
+		state: machine.value.value,
+		returnTo: machine.value.context.returnTo,
+		step: machineStep.value
+	})
+)
 
 const status = computed(() =>
 	statusFromState(machine.value.value, machine.value.context.direction)
@@ -56,7 +68,7 @@ watch(machine.value.context.errors, (newErrors) => {
 <template>
   <div :class="{ CurrentOperationWrapper: true, isLoading, hasCTA }">
     <div class="ProgressBar">
-      <ProgressBar :steps :step />
+      <ProgressBar :steps="uiProgress.steps" :step="uiProgress.step" />
     </div>
     <div class="Operation">
       <div class="Table">

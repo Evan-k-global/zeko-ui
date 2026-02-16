@@ -17,10 +17,23 @@ export const withdrawalSteps = [
 ] as const
 
 export const steps = ["Send", "Confirming", "Claim", "Finalizing"] as const
+export const cancellationSteps = ["Send", "Confirming", "Cancel", "Cancelling"] as const
+export const cancellationFlowStage = {
+	Send: 0,
+	Confirming: 1,
+	Cancel: 2,
+	Cancelling: cancellationSteps.length
+} as const
 
 type Direction = "deposit" | "withdrawal"
+type ProgressFlow = "default" | "cancellation"
 
 type MachineStates = ReturnType<(typeof bridgeOperationMachine)["getInitialSnapshot"]>["value"]
+type UiProgress = {
+	flow: ProgressFlow
+	steps: readonly string[]
+	step: number
+}
 
 const deposit = (kind: "pending" | "complete") => (step: number) => ({
 	text: depositSteps[step] as (typeof depositSteps)[number],
@@ -69,6 +82,55 @@ export const statusFromState = (
 		if ("CANCEL_DEPOSIT" in state) return { text: "Cancelling", kind: "pending" }
 	}
 	return isDeposit ? pendingDeposit(1) : pendingWithdrawal(1)
+}
+
+export const isCancellationFlow = (state: MachineStates, returnTo?: string | false): boolean => {
+	if (typeof state === "string") {
+		return (
+			state === "CAN_CANCEL" ||
+			state === "DEPOSIT_CANCELLED" ||
+			state === "BRIDGE_OPERATION_CANCELLED_DONE" ||
+			(state === "WAITING_FOR_NETWORK" && returnTo === "CANCEL_DEPOSIT")
+		)
+	}
+	return "CANCEL_DEPOSIT" in state
+}
+
+export const progressFromState = ({
+	state,
+	returnTo,
+	step
+}: {
+	state: MachineStates
+	returnTo?: string | false
+	step: number
+}): UiProgress => {
+	if (!isCancellationFlow(state, returnTo)) return { flow: "default", steps, step }
+	if (typeof state === "string") {
+		if (state === "CAN_CANCEL") {
+			return {
+				flow: "cancellation",
+				steps: cancellationSteps,
+				step: cancellationFlowStage.Cancel
+			}
+		}
+		if (state === "WAITING_FOR_NETWORK" && returnTo === "CANCEL_DEPOSIT")
+			// The machine pauses on network mismatch, but the user-facing stage is still "Cancel".
+			return {
+				flow: "cancellation",
+				steps: cancellationSteps,
+				step: cancellationFlowStage.Cancel
+			}
+		if (state === "DEPOSIT_CANCELLED" || state === "BRIDGE_OPERATION_CANCELLED_DONE") {
+			// ProgressBar marks final label complete only when step === steps.length.
+			return {
+				flow: "cancellation",
+				steps: cancellationSteps,
+				step: cancellationFlowStage.Cancelling
+			}
+		}
+	}
+	return { flow: "cancellation", steps: cancellationSteps, step: 3 }
 }
 
 export const errorToaster = createToaster({

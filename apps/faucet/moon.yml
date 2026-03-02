@@ -2,10 +2,32 @@ layer: application
 tasks:
   container-dev:
     command: bun --hot src/index.ts
+    preset: server
   container-start:
     command: bun src/index.ts
+    preset: server
   dev:
     command: wrangler dev
+  test:
+    command: vitest run
+    inputs:
+      - tsconfig.json
+      - worker.ts
+      - worker/**/*.ts
+      - worker-configuration.d.ts
+      - test/**/*.ts
+      - test/tsconfig.json
+      - vitest.config.ts
+  typecheck:
+    command: tsc --noEmit -p test/tsconfig.json
+    inputs:
+      - tsconfig.json
+      - worker.ts
+      - worker/**/*.ts
+      - worker-configuration.d.ts
+      - src/**/*.ts
+      - test/**/*.ts
+      - test/tsconfig.json
   type-cf:
     command: wrangler types
     inputs:

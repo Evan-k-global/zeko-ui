@@ -1,0 +1,27 @@
+{
+	"name": "@zeko-labs/faucet-cli",
+	"version": "0.1.0",
+	"description": "Public CLI for claiming Zeko testnet faucet funds and verifying GitHub authentication.",
+	"type": "module",
+	"keywords": ["zeko", "faucet", "cli", "rust"],
+	"license": "MIT",
+	"publishConfig": {
+		"access": "public"
+	},
+	"files": ["bin", "npm"],
+	"bin": {
+		"zeko-faucet": "./bin/zeko-faucet.js"
+	},
+	"optionalDependencies": {
+		"@zeko-labs/faucet-cli-darwin-arm64": "workspace:*",
+		"@zeko-labs/faucet-cli-darwin-x64": "workspace:*",
+		"@zeko-labs/faucet-cli-linux-x64": "workspace:*",
+		"@zeko-labs/faucet-cli-linux-arm64": "workspace:*",
+		"@zeko-labs/faucet-cli-win32-x64": "workspace:*",
+		"@zeko-labs/faucet-cli-win32-arm64": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "^20.8.10",
+		"vitest": "catalog:"
+	}
+}

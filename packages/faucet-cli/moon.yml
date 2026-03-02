@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=../../.moon/cache/schemas/project.json
+
+layer: library
+
+fileGroups:
+  src:
+    - bin/**/*
+    - src/**/*
+    - Cargo.toml
+    - package.json
+  tests:
+    - test/**/*
+    - vitest.config.ts
+
+tasks:
+  build:
+    command: cargo build --release
+    inputs:
+      - "src/**"
+      - "Cargo.toml"
+  test:
+    command: vitest run
+    inputs:
+      - "@group(tests)"
+    deps:
+      - build
+  check:
+    command: cargo check
+    inputs:
+      - "src/**"
+      - "Cargo.toml"
+  lint:
+    command: cargo clippy -- -D warnings
+    inputs:
+      - "src/**"
+      - "Cargo.toml"
+  publish:
+    command: node scripts/publish.mjs
+    deps:
+      - build

@@ -5,6 +5,7 @@
 .nitro
 .cache
 dist
+coverage
 .vitepress/cache
 
 # Node dependencies
@@ -29,5 +30,10 @@ logs
 .moon/docker
 
 .playwright-mcp
+ataski/worktrees/
 
 .wrangler
+
+# Rust
+target/
+Cargo.lock

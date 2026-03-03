@@ -17,5 +17,23 @@
 	"access": "public",
 	"baseBranch": "main",
 	"updateInternalDependencies": "patch",
-	"ignore": []
+	"ignore": [
+		"@zeko/bridge-sdk",
+		"@zeko/graphql",
+		"@zeko/design",
+		"@zeko/layer",
+		"@zeko/proxy-handler",
+		"@zeko/bridge-ui",
+		"@zeko/leaderboard-admin",
+		"@zeko/leaderboard-ui",
+		"@zeko/docs",
+		"@zeko/faucet-ui",
+		"@zeko/mina-archive-proxy",
+		"@zeko/mina-proxy",
+		"@zeko/actions-api",
+		"@zeko/actions-indexer",
+		"@zeko/leaderboard-indexer",
+		"@leaderboard/api",
+		"faucet"
+	]
 }

@@ -34,7 +34,7 @@ jobs:
         with:
           title: "release: version packages"
           commit: "release: version packages"
-          version: pnpm changeset version
+          version: bun scripts/changeset-version.ts
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -58,5 +58,8 @@ jobs:
     name: Release Faucet CLI
     needs: release
     if: needs.release.outputs.hasChangesets == 'false'
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/release-faucet-cli.yaml
     secrets: inherit

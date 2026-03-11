@@ -54,3 +54,12 @@
 - T068 | done | fix-indexer-reset-control-race | done/T068-fix-indexer-reset-control-race.md
 - T069 | done | reject-overlapping-reset-requests | done/T069-reject-overlapping-reset-requests.md
 - T070 | done | handle-signal-terminated-log-streams | done/T070-handle-signal-terminated-log-streams.md
+- T071 | done | indexer-canonical-progression | done/T071-indexer-canonical-progression.md
+- T072 | done | indexer-loop-failure-isolation | done/T072-indexer-loop-failure-isolation.md
+- T073 | done | bridge-history-diagnostics | done/T073-bridge-history-diagnostics.md
+- T074 | done | merge-main-and-resolve-web-395-conflicts | done/T074-merge-main-and-resolve-web-395-conflicts.md
+- T075 | done | fix-bridge-sdk-ci-test-ordering | done/T075-fix-bridge-sdk-ci-test-ordering.md
+- T076 | done | investigate-indexer-review-followups | done/T076-investigate-indexer-review-followups.md
+- T077 | done | investigate-bridge-sdk-review-followups | done/T077-investigate-bridge-sdk-review-followups.md
+- T078 | done | add-bridge-sdk-changeset-and-clean-test-config | done/T078-add-bridge-sdk-changeset-and-clean-test-config.md
+- T079 | done | review-indexer-query-efficiency-and-indexes | done/T079-review-indexer-query-efficiency-and-indexes.md

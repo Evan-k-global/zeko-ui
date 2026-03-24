@@ -141,3 +141,10 @@
 - T141 | done | fix-deposit-queue-ordering-across-bridge-stack | done/T141-fix-deposit-queue-ordering-across-bridge-stack.md
 - T142 | done | revert-terminal-ui-cancel-priority-until-split-widget | done/T142-revert-terminal-ui-cancel-priority-until-split-widget.md
 - T143 | done | merge-main-and-resolve-pr-conflicts | done/T143-merge-main-and-resolve-pr-conflicts.md
+- T144 | done | rename-use-zeko-package-and-sync-to-zeko-skills | done/T144-rename-use-zeko-package-and-sync-to-zeko-skills.md
+- T145 | done | rewrite-public-readme-and-move-maintainer-docs | done/T145-rewrite-public-readme-and-move-maintainer-docs.md
+- T146 | done | add-docs-site-section-for-zeko-skills | done/T146-add-docs-site-section-for-zeko-skills.md
+- T147 | done | validate-and-fix-zeko-skills-clawhub-metadata | done/T147-validate-and-fix-zeko-skills-clawhub-metadata.md
+- T148 | done | automate-zeko-skills-clawhub-publish | done/T148-automate-zeko-skills-clawhub-publish.md
+- T149 | done | fix-clawhub-tag-fallback-and-merge-conflicts | done/T149-fix-clawhub-tag-fallback-and-merge-conflicts.md
+- T150 | done | fix-docs-link-check-flake-for-github-5xx | done/T150-fix-docs-link-check-flake-for-github-5xx.md

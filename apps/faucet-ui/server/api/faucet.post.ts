@@ -1,28 +1,6 @@
 import { type } from "arktype"
-import {
-	FAUCET_CHAIN,
-	type FaucetErrorResponse,
-	type FaucetResponse,
-	parseFaucetResponse
-} from "~~/helpers/validation"
+import { FAUCET_CHAIN, type FaucetErrorResponse, parseFaucetResponse } from "~~/helpers/validation"
 import { getTrustedClientIp, validateBody, verifyTurnstile } from "../utils"
-
-type FaucetTurnstileRpcResult = {
-	status: number
-	payload: FaucetResponse
-}
-
-type FaucetTurnstileRpcBinding = {
-	claimWithTurnstile: (input: {
-		address: string
-		chain: typeof FAUCET_CHAIN
-		clientIp: string
-	}) => Promise<FaucetTurnstileRpcResult>
-}
-
-type FaucetRpcEnv = {
-	FAUCET_RPC: FaucetTurnstileRpcBinding
-}
 
 const jsonError = (status: number, code: string, message: string) =>
 	Response.json(
@@ -62,7 +40,7 @@ export default defineEventHandler(async (event) => {
 	// Turnstile is verified in the UI worker, then forwarded via internal Worker RPC only.
 	const faucetResult = await (async () => {
 		try {
-			return await (env as unknown as FaucetRpcEnv).FAUCET_RPC.claimWithTurnstile({
+			return await env.FAUCET_RPC.claimWithTurnstile({
 				address: body.address,
 				chain: FAUCET_CHAIN,
 				clientIp

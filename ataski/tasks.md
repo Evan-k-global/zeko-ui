@@ -150,3 +150,11 @@
 - T150 | done | fix-docs-link-check-flake-for-github-5xx | done/T150-fix-docs-link-check-flake-for-github-5xx.md
 - T151 | done | fix-faucet-ui-service-rpc-entrypoint-binding | done/T151-fix-faucet-ui-service-rpc-entrypoint-binding.md
 - T152 | done | split-faucet-fetch-and-rpc-service-bindings | done/T152-split-faucet-fetch-and-rpc-service-bindings.md
+- T153 | done | normalize-bridge-operation-timestamps-and-harden-history-render | done/T153-normalize-bridge-operation-timestamps-and-harden-history-render.md
+- T154 | done | capture-app-root-errors-in-sentry | done/T154-capture-app-root-errors-in-sentry.md
+- T155 | done | validate-bridge-error-capture-and-update-policy-docs | done/T155-validate-bridge-error-capture-and-update-policy-docs.md
+- T156 | done | clarify-default-publish-behavior-for-named-pr-worktrees | done/T156-clarify-default-publish-behavior-for-named-pr-worktrees.md
+- T157 | done | require-remote-review-handoff-with-pr-url | done/T157-require-remote-review-handoff-with-pr-url.md
+- T158 | done | merge-origin-main-and-resolve-conflicts-for-web-410 | done/T158-merge-origin-main-and-resolve-conflicts-for-web-410.md
+- T159 | done | validate-review-findings-and-simplify-bridge-ui-error-capture | done/T159-validate-review-findings-and-simplify-bridge-ui-error-capture.md
+- T160 | done | validate-web-410-after-merge-and-review-fixes | done/T160-validate-web-410-after-merge-and-review-fixes.md

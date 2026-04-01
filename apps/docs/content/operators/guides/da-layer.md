@@ -54,11 +54,11 @@ To run a da-layer you will need:
 
 ### Volumes/files
 
-| Volumes         | Files        | Purpose                                       |
-| --------------- | ------------ | --------------------------------------------- |
-| `keys_data`     | `da-node-sk` | Private key of the DA node                    |
-| `keys_data`     | `da-node-pk` | Public key of the DA node (used by sequencer) |
-| `da-layer_data` |              | Persistent storage for da-layer               |
+| Volumes         | Files         | Purpose                                       |
+| --------------- | ------------- | --------------------------------------------- |
+| `keys_data`     | `da-layer-sk` | Private key of the DA node                    |
+| `keys_data`     | `da-layer-pk` | Public key of the DA node (used by sequencer) |
+| `da-layer_data` |               | Persistent storage for da-layer               |
 
 ### Service Overview
 

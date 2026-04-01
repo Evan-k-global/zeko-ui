@@ -2,7 +2,7 @@
 
 This guide explains how to add the archive stack on top of an existing Zeko DA node so you can index and query historical data.
 
-> **Note:** This runbook uses self hosted DA node. However you could also use publicly available DA node.
+> **Note:** This runbook uses a self-hosted DA node. However, you could also use a publicly available DA node.
 
 Complete [Running Zeko's DA Node](./da-layer.md) first. This runbook assumes:
 
@@ -48,15 +48,15 @@ The archive stack adds the following services:
 
 ### Volumes/files
 
-| Volumes              | Files        | Purpose                                       |
-| -------------------- | ------------ | --------------------------------------------- |
-| `initdb_data`        |              | Schema file(s) to bootstrap PostgreSQL        |
-| `postgresql_data`    |              | Persistent storage for PostgreSQL             |
-| `archive_data`       |              | Persistent storage for `archive`              |
-| `archive-relay_data` |              | Persistent storage for `archive-relay`        |
-| `keys_data`          | `da-node-sk` | Private key of the DA node                    |
-| `keys_data`          | `da-node-pk` | Public key of the DA node (used by sequencer) |
-| `da-layer_data`      |              | Persistent storage for da-layer               |
+| Volumes              | Files         | Purpose                                       |
+| -------------------- | ------------- | --------------------------------------------- |
+| `initdb_data`        |               | Schema file(s) to bootstrap PostgreSQL        |
+| `postgresql_data`    |               | Persistent storage for PostgreSQL             |
+| `archive_data`       |               | Persistent storage for `archive`              |
+| `archive-relay_data` |               | Persistent storage for `archive-relay`        |
+| `keys_data`          | `da-layer-sk` | Private key of the DA node                    |
+| `keys_data`          | `da-layer-pk` | Public key of the DA node (used by sequencer) |
+| `da-layer_data`      |               | Persistent storage for da-layer               |
 
 ### Service Overview
 

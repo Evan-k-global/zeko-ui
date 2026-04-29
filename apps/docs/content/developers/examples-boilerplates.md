@@ -2,11 +2,7 @@
 
 Browse ready-to-use code examples and boilerplate projects to kickstart your Zeko development.
 
-To get up and running quickly, see the [Quick Start guide](../introduction/quick-start.md) which walks through the available resources for developers, end users, and node operators.
-
-## GitHub Organization
-
-- [Zeko Labs](https://github.com/zeko-labs): the main GitHub organization for Zeko protocol code, developer demos, agent skills, CLIs, SDKs, and related tools.
+To get up and running quickly, see the [Quick Start guide](../introduction/quick-start.md) which walks through the available resources for developers, end users, and node operators. [Zeko Labs](https://github.com/zeko-labs) is the main GitHub organization for Zeko protocol code, developer demos, agent skills, CLIs, SDKs, and related tools.
 
 ## Developer Demos
 

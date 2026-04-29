@@ -10,17 +10,17 @@ To get up and running quickly, see the [Quick Start guide](../introduction/quick
 
 ## Developer Demos
 
-The [developer_demos](https://github.com/zeko-labs/developer_demos) repository is a monorepo of end-to-end examples for building zero-knowledge applications on Zeko and Mina. Each demo is independent, so start with the README and docs inside the folder you want to run.
+The [developer_demos](https://github.com/zeko-labs/developer_demos) repository is a monorepo of end-to-end examples for building zero-knowledge applications on Zeko. Each demo is independent, so start with the README and docs inside the folder you want to run.
 
 The descriptions below are condensed from the public repository README and current folder tree.
 
-| Demo | Folder | What it demonstrates | Agent skills |
-| --- | --- | --- | --- |
-| Agent Coordination Protocol | [`agent_coordination_protocol-financial_intelligence`](https://github.com/zeko-labs/developer_demos/tree/main/agent_coordination_protocol-financial_intelligence) | Privacy-preserving agent marketplace and payment flow with request, accept, deliver, attest, wallet payment, relayer, credits, performance, and settlement patterns. | Includes skills for agent marketplaces, attestations, credits ledgers, escrow ACP flows, model adapters, price data, private outputs, relayers, storage hardening, and wallet connection. |
-| Private Prediction Market | [`perfect-weather_prediction_market`](https://github.com/zeko-labs/developer_demos/tree/main/perfect-weather_prediction_market) | Private weather prediction market with hosted frontend, oracle worker, transaction prover services, wallet-signed bet and claim flows, event sync, and zk-backed settlement. | Includes skills for weather market demos, private betting privacy, private market protocol design, agent-market integration, event sync/archive operations, market ops, and zkTLS weather oracle workflows. |
-| Private Data Registry & Transaction Sponsor | [`proof_of_prayer`](https://github.com/zeko-labs/developer_demos/tree/main/proof_of_prayer) | Privacy-preserving consumer app with encrypted user content, wallet and non-wallet submission paths, sponsored anchoring, moderation, and participation-proof patterns. | Includes a Zeko Auro zkApp debugging skill for wallet connection and transaction troubleshooting. |
-| AI & Truth: Data Provenance | [`proof_over_hype_ai_image_provenance`](https://github.com/zeko-labs/developer_demos/tree/main/proof_over_hype_ai_image_provenance) | AI media provenance demo with image provenance, metadata flows, attestable claim patterns, and reference frontend/backend wiring for verifiable media UX. | No dedicated `skills/` folder listed in the public repo today. |
-| Verifiable AI Execution & Runtime | [`zeko_ai_runtime`](https://github.com/zeko-labs/developer_demos/tree/main/zeko_ai_runtime) | Zeko-native verifiable AI runtime with off-chain inference, attestable receipts, sealed private inputs, client-encrypted outputs, operator routing, failover, credits, and compatibility adapters. | No dedicated `skills/` folder listed in the public repo today. |
+| Demo | What it demonstrates | Agent skills |
+| --- | --- | --- |
+| [Agent Coordination Protocol](https://github.com/zeko-labs/developer_demos/tree/main/agent_coordination_protocol-financial_intelligence) | Privacy-preserving agent marketplace and payment flow with request, accept, deliver, attest, wallet payment, relayer, credits, performance, and settlement patterns. | Includes skills for agent marketplaces, attestations, credits ledgers, escrow ACP flows, model adapters, price data, private outputs, relayers, storage hardening, and wallet connection. |
+| [Private Prediction Market](https://github.com/zeko-labs/developer_demos/tree/main/perfect-weather_prediction_market) | Private weather prediction market with hosted frontend, oracle worker, transaction prover services, wallet-signed bet and claim flows, event sync, and zk-backed settlement. | Includes skills for weather market demos, private betting privacy, private market protocol design, agent-market integration, event sync/archive operations, market ops, and zkTLS weather oracle workflows. |
+| [Private Data Registry & Transaction Sponsor](https://github.com/zeko-labs/developer_demos/tree/main/proof_of_prayer) | Privacy-preserving consumer app with encrypted user content, wallet and non-wallet submission paths, sponsored anchoring, moderation, and participation-proof patterns. | Includes a Zeko Auro zkApp debugging skill for wallet connection and transaction troubleshooting. |
+| [AI & Truth: Data Provenance](https://github.com/zeko-labs/developer_demos/tree/main/proof_over_hype_ai_image_provenance) | AI media provenance demo with image provenance, metadata flows, attestable claim patterns, and reference frontend/backend wiring for verifiable media UX. | No dedicated `skills/` folder listed in the public repo today. |
+| [Verifiable AI Execution & Runtime](https://github.com/zeko-labs/developer_demos/tree/main/zeko_ai_runtime) | Zeko-native verifiable AI runtime with off-chain inference, attestable receipts, sealed private inputs, client-encrypted outputs, operator routing, failover, credits, and compatibility adapters. | No dedicated `skills/` folder listed in the public repo today. |
 
 ## Agent Skills
 
@@ -38,8 +38,8 @@ Install the public Zeko skill with:
 
 | Tool | What it is for |
 | --- | --- |
-| [Bridge CLI](https://github.com/zeko-labs/bridge-cli) | `zeko-bridge` command-line tool for bridging assets between Mina and Zeko. The high-level `bridge` command signs, submits, waits, retries transient checks, advances queued claims, and streams progress until completion. |
+| [Bridge CLI](https://github.com/zeko-labs/bridge-cli) | `zeko-bridge` command-line tool for bridging assets between Mina L1 and Zeko. The high-level `bridge` command signs, submits, waits, retries transient checks, advances queued claims, and streams progress until completion. |
 | [Bridge SDK](https://github.com/zeko-labs/bridge-sdk) | TypeScript SDK for integrating deposits and withdrawals between Mina L1 and Zeko L2 into applications, services, and scripts. |
-| [Faucet CLI](https://github.com/zeko-labs/faucet-cli) | Command-line client for the Zeko testnet faucet. Use it to verify GitHub authentication and claim testnet tokens for a Mina/Zeko address. |
+| [Faucet CLI](https://github.com/zeko-labs/faucet-cli) | Command-line client for the Zeko testnet faucet. Use it to verify GitHub authentication and claim testnet tokens for a Zeko address. |
 | [x402 Zeko](https://github.com/zeko-labs/x402-zeko) | x402 starter for Zeko-centric paid services, including `402 Payment Required` negotiation, signed payment authorization payloads, Zeko testnet settlement, EVM/Base/Ethereum USDC rails, and proof-oriented payment metadata. |
 | [Launch a Rollup](https://docs.zeko.io/operators/guides/launch-rollup.html) | Operator guide for launching a Zeko rollup stack with sequencer, DA layer, prover, PostgreSQL, RabbitMQ, wallets, keys, deployment config, and Docker Compose. |

@@ -2,7 +2,29 @@
 
 Browse ready-to-use code examples and boilerplate projects to kickstart your Zeko development.
 
-To get up and running quickly, see the [Quick Start guide](../introduction/quick-start.md) which walks through the available resources for developers, end users, and node operators. [Zeko Labs](https://github.com/zeko-labs) is the main GitHub organization for Zeko protocol code, developer demos, agent skills, CLIs, SDKs, and related tools.
+To get up and running quickly, see the [Quick Start guide](../introduction/quick-start.md), which walks through resources for developers, end users, and node operators. [Zeko Labs](https://github.com/zeko-labs) is the main GitHub organization for Zeko protocol code, developer demos, agent skills, CLIs, SDKs, and related tools.
+
+Before using a demo, read [How to Use These Demos](#how-to-use-these-demos) for the recommended prompt-first workflow and production review guidance.
+
+## How to Use These Demos
+
+These demos are working reference implementations and agent context. Before deploying anything derived from a demo to production, teams should run their own final code review, security review, and audit.
+
+Recommended workflow:
+
+1. Start with the demo README, docs, scripts, and local agent skills.
+2. Ask your agent to extract a PRD, litepaper, or architecture document from the demo.
+3. Use that document to first generate a fresh implementation instead of only copying demo code.
+4. Review the result against Zeko docs, o1js docs, the demo source, and relevant skills.
+
+Useful context links for agents:
+
+- [Zeko Developer Getting Started](https://docs.zeko.io/developers/getting-started.html)
+- [Zeko Core Concepts](https://docs.zeko.io/architecture/zeko-core-concepts.html)
+- [o1js Documentation](https://docs.o1labs.org/)
+- [zeko-skills](https://github.com/zeko-labs/zeko-skills)
+- [developer_demos](https://github.com/zeko-labs/developer_demos)
+
 
 ## Developer Demos
 
@@ -20,14 +42,14 @@ The descriptions below are condensed from the public repository README and curre
 | [Private Data Registry & Transaction Sponsor](https://github.com/zeko-labs/developer_demos/tree/main/proof_of_prayer) | Privacy-preserving consumer app with encrypted user content, wallet and non-wallet submission paths, sponsored anchoring, moderation, and participation-proof patterns. | Includes a Zeko Auro zkApp debugging skill for wallet connection and transaction troubleshooting. |
 | [AI & Truth: Data Provenance](https://github.com/zeko-labs/developer_demos/tree/main/proof_over_hype_ai_image_provenance) | AI media provenance demo with image provenance, metadata flows, attestable claim patterns, and reference frontend/backend wiring for verifiable media UX. | Includes skills for Auro zkApp preflight, deterministic image canonicalization, historical proof verification, secure public demo packaging, non-magic fee-payer flows, and safe zkApp redeploy consistency. |
 | [Verifiable AI Execution & Runtime](https://github.com/zeko-labs/developer_demos/tree/main/zeko_ai_runtime) | Zeko-native verifiable AI runtime with off-chain inference, attestable receipts, sealed private inputs, client-encrypted outputs, operator routing, failover, credits, and compatibility adapters. | Includes runtime-scoped skills for native and private inference builders, credits balance operators, lane/operator failover, and compatibility adapters for legacy-shaped integrations. |
+| [Agent Mission-Bound Auth](https://github.com/zeko-labs/developer_demos/tree/main/agent-mission-bound-auth) | Protocol sidecar for delegated and autonomous agents: binds enterprise OIDC identity to a specific mission, signs approvals, enforces checkpoints before side effects, links x402 payment context, exports portable `zk-mission-bundle-v1` receipts, and optionally anchors approval/receipt roots on Zeko. | No dedicated demo-local skill files are listed in the public repo today; the demo provides protocol docs, schemas, SDK helpers, conformance scripts, OAuth setup docs, and an external app starter for agents to follow. |
 
 ## Agent Skills
 
 | Resource | What it is for |
 | --- | --- |
-| [zeko-skills](https://github.com/zeko-labs/zeko-skills) | Public Zeko skills for AI agents that need to bridge assets, get faucet funds, inspect endpoints, run GraphQL or `curl` queries, understand sequencer/archive/DA components, or help users build zkApps on Zeko with `o1js` or OCaml. |
-| [`skills/zeko`](https://github.com/zeko-labs/zeko-skills/tree/main/skills/zeko) | The installable `zeko` agent skill. It is tuned for practical Zeko builder workflows, including Bridge CLI/SDK usage, faucet flows, endpoint discovery, live/archive queries, and zkApp development orientation. |
-| Demo-local skills | Some developer demos include their own `skills/` folders for domain-specific agent workflows. These are useful when an agent needs to operate inside a demo, explain a protocol path, or debug a demo-specific integration. |
+| [Zeko Skills](https://github.com/zeko-labs/zeko-skills) | The public installable `zeko` skill for agents working with Zeko: Bridge CLI/SDK usage, faucet flows, endpoint discovery, GraphQL and `curl` queries, sequencer/archive/DA orientation, and zkApp development with `o1js` or OCaml. |
+| Demo-local skills | Many demos include their own `skills/`, `agent-skills/`, `agent_skills/`, or `docs/agent-skills.md` files for domain-specific workflows. Use these when an agent needs to understand, operate, or extend a specific demo. |
 
 Install the public Zeko skill with:
 

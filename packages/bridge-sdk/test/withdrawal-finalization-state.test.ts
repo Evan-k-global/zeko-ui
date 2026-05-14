@@ -169,6 +169,20 @@ afterEach(() => {
 })
 
 describe("withdrawal finalization state", () => {
+	it("reports the finalizable withdrawal index", async () => {
+		const bridge = buildBridge()
+		const withdrawal = buildWithdrawal()
+		const witness = buildInnerWitness(withdrawal, 4)
+		mockWithdrawalState({ bridge, withdrawal, witness })
+
+		await expect(bridge.canFinalizeWithdrawal(recipient)).resolves.toMatchObject({
+			available: true,
+			status: "available",
+			reason: null,
+			index: 4
+		})
+	})
+
 	it("falls back to cursorless live withdrawal actions when the archive cursor is not retained live", async () => {
 		const bridge = buildBridge()
 		const withdrawal = buildWithdrawal()
@@ -254,7 +268,8 @@ describe("withdrawal finalization state", () => {
 		await expect(bridge.canFinalizeWithdrawal(recipient)).resolves.toMatchObject({
 			available: false,
 			status: "alreadyFinalised",
-			reason: "Withdrawal already finalised"
+			reason: "Withdrawal already finalised",
+			index: 0
 		})
 	})
 
@@ -267,7 +282,8 @@ describe("withdrawal finalization state", () => {
 		await expect(bridge.canFinalizeWithdrawal(recipient)).resolves.toMatchObject({
 			available: false,
 			status: "alreadyFinalised",
-			reason: "Withdrawal already finalised"
+			reason: "Withdrawal already finalised",
+			index: 0
 		})
 	})
 

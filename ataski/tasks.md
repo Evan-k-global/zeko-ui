@@ -238,3 +238,5 @@
 - T238 | done | resolve-web-404-main-conflicts | done/T238-resolve-web-404-main-conflicts.md
 - T239 | done | validate-gemini-copilot-findings | done/T239-validate-gemini-copilot-findings.md
 - T240 | done | fix-pr159-ci-and-validate-queue-review | done/T240-fix-pr159-ci-and-validate-queue-review.md
+- T241 | done | filter-legacy-bridge-operations | done/T241-filter-legacy-bridge-operations.md
+- T242 | done | resolve-legacy-bridge-operation-pr-conflicts | done/T242-resolve-legacy-bridge-operation-pr-conflicts.md

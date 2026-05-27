@@ -271,3 +271,6 @@
 - T271 | done | resolve-pr184-review-followups | done/T271-resolve-pr184-review-followups.md
 - T272 | done | fix-bridge-ui-preview-wrangler-config | done/T272-fix-bridge-ui-preview-wrangler-config.md
 - T273 | done | fix-actions-api-testnet-workers-builds | done/T273-fix-actions-api-testnet-workers-builds.md
+- T274 | done | fix-mainnet-actions-indexer-release-validation | done/T274-fix-mainnet-actions-indexer-release-validation.md
+- T275 | done | install-nu-through-proto-toolchain-setup | done/T275-install-nu-through-proto-toolchain-setup.md
+- T276 | done | retry-mainnet-bridge-ui-smoke | done/T276-retry-mainnet-bridge-ui-smoke.md

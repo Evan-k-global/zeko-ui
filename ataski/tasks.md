@@ -276,3 +276,11 @@
 - T276 | done | retry-mainnet-bridge-ui-smoke | done/T276-retry-mainnet-bridge-ui-smoke.md
 - T277 | done | fix-bridge-ui-testnet-workers-build | done/T277-fix-bridge-ui-testnet-workers-build.md
 - T278 | done | docs-mainnet-wip-cleanup | done/T278-docs-mainnet-wip-cleanup.md
+- T279 | done | confirm-actions-index-holes | done/T279-confirm-actions-index-holes.md
+- T280 | done | harden-action-inserts | done/T280-harden-action-inserts.md
+- T281 | done | bridge-rebuild-validation-plan | done/T281-bridge-rebuild-validation-plan.md
+- T282 | done | self-heal-action-index-drift | done/T282-self-heal-action-index-drift.md
+- T283 | done | fix-linked-gap-repair-index | done/T283-fix-linked-gap-repair-index.md
+- T284 | done | fix-repair-delete-and-scan-cost | done/T284-fix-repair-delete-and-scan-cost.md
+- T285 | done | fix-leading-index-hole-detection | done/T285-fix-leading-index-hole-detection.md
+- T286 | done | block-indexing-after-repair-failure | done/T286-block-indexing-after-repair-failure.md

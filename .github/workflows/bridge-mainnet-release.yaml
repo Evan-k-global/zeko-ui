@@ -2,6 +2,11 @@ name: Bridge Mainnet Release
 
 on:
   workflow_dispatch:
+    inputs:
+      linear_base_ref:
+        description: "Optional previous mainnet release SHA/ref for Linear release bootstrap"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -102,6 +107,7 @@ jobs:
           access_key: ${{ secrets.LINEAR_BRIDGE_MAINNET_PROMOTION_KEY }}
           name: bridge-mainnet-${{ github.run_number }}
           version: ${{ github.sha }}
+          base_ref: ${{ inputs.linear_base_ref }}
           include_paths: services/actions/api/**,services/actions/indexer/**,apps/bridge-ui/**
           links: |
             GitHub workflow=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

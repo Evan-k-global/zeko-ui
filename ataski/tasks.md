@@ -299,3 +299,5 @@
 - T299 | done | standardize-gateway-endpoint-urls | done/T299-standardize-gateway-endpoint-urls.md
 - T300 | done | restore-proxy-alias-fallbacks | done/T300-restore-proxy-alias-fallbacks.md
 - T301 | done | resolve-pr-198-conflicts | done/T301-resolve-pr-198-conflicts.md
+- T302 | done | rewrite-cloudflare-build-config-cli | done/T302-rewrite-cloudflare-build-config-cli.md
+- T303 | done | trigger-workers-builds-after-sync | done/T303-trigger-workers-builds-after-sync.md

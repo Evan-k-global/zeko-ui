@@ -302,3 +302,4 @@
 - T302 | done | rewrite-cloudflare-build-config-cli | done/T302-rewrite-cloudflare-build-config-cli.md
 - T303 | done | trigger-workers-builds-after-sync | done/T303-trigger-workers-builds-after-sync.md
 - T304 | done | fix-cloudflare-sync-workflow-ci-invocation | done/T304-fix-cloudflare-sync-workflow-ci-invocation.md
+- T305 | done | expose-sentry-secrets-to-cloudflare-sync-workflow | done/T305-expose-sentry-secrets-to-cloudflare-sync-workflow.md

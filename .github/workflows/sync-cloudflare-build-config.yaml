@@ -29,6 +29,8 @@ jobs:
       CLOUDFLARE_BUILD_TOKEN_UUID: ${{ secrets.CLOUDFLARE_BUILD_TOKEN_UUID }}
       CLOUDFLARE_REPO_CONNECTION_UUID: ${{ secrets.CLOUDFLARE_REPO_CONNECTION_UUID }}
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_DSN_PUBLIC: ${{ secrets.SENTRY_DSN_PUBLIC }}
     steps:
       - uses: actions/checkout@v4
         with:

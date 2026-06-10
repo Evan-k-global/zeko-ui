@@ -739,48 +739,51 @@ export async function fetchWithdrawalsWithStates(
 	)
 
 	const normalizeTimestamp = (timestamp: string) => (timestamp === "0" ? "" : timestamp)
+	const isFinalised = (index: number) =>
+		nextWithdrawal.greaterThanOrEqual(UInt32.from(index + 1)).toBoolean()
+	const isCommitted = (index: number) =>
+		isFinalised(index) ||
+		(lastCommit === null
+			? false
+			: lastCommit.innerActionStateLength.greaterThan(UInt32.from(index)).toBoolean())
 
 	const witnessedAuxes = new Set(
 		withdrawalWitnesses.map((witness) => witness.aux.toBigInt().toString())
 	)
 	const provisionalWithdrawals = withdrawals
 		.filter((withdrawal) => !witnessedAuxes.has(withdrawalAux(withdrawal).toBigInt().toString()))
-		.map((withdrawal, index, pending) => ({
+		.map((withdrawal) => ({
 			...withdrawal,
 			timestamp: normalizeTimestamp(withdrawal.timestamp),
-			index: -(pending.length - index),
-			committed: false,
-			finalised: false,
+			index: withdrawal.index,
+			committed: isCommitted(withdrawal.index),
+			finalised: isFinalised(withdrawal.index),
 			bridgeVersion: bridgeVersionForActionIndex({
-				actionIndex: -(pending.length - index),
+				actionIndex: withdrawal.index,
 				v2StartIndex: runtime.V2_WITHDRAWALS_START_INDEX
 			})
 		}))
+	const currentWithdrawalStatuses: WithdrawalWithState[] = [
+		...withdrawalWitnesses.map((witness) => {
+			const withdrawal = auxesMap.get(witness.aux.toBigInt())
+			if (!withdrawal) throw new Error("Unreachable: Did not find withdrawal")
+			return {
+				...withdrawal,
+				...witness,
+				timestamp: normalizeTimestamp(witness.timestamp),
+				committed: isCommitted(witness.index),
+				finalised: isFinalised(witness.index),
+				bridgeVersion: bridgeVersionForActionIndex({
+					actionIndex: witness.index,
+					v2StartIndex: runtime.V2_WITHDRAWALS_START_INDEX
+				})
+			}
+		}),
+		...provisionalWithdrawals
+	]
 
 	return {
-		withdrawals: [
-			...withdrawalWitnesses.map((witness) => {
-				const withdrawal = auxesMap.get(witness.aux.toBigInt())
-				if (!withdrawal) throw new Error("Unreachable: Did not find withdrawal")
-				return {
-					...withdrawal,
-					...witness,
-					timestamp: normalizeTimestamp(witness.timestamp),
-					committed:
-						lastCommit === null
-							? false
-							: lastCommit.innerActionStateLength
-									.greaterThan(UInt32.from(witness.index))
-									.toBoolean(),
-					finalised: nextWithdrawal.greaterThanOrEqual(UInt32.from(witness.index + 1)).toBoolean(),
-					bridgeVersion: bridgeVersionForActionIndex({
-						actionIndex: witness.index,
-						v2StartIndex: runtime.V2_WITHDRAWALS_START_INDEX
-					})
-				}
-			}),
-			...provisionalWithdrawals
-		],
+		withdrawals: currentWithdrawalStatuses,
 		committedIndex:
 			lastCommit === null ? -1 : +safeDecrement(lastCommit.innerActionStateLength).toString(),
 		finalisedIndex: +safeDecrement(nextWithdrawal).toString()

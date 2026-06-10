@@ -1,0 +1,63 @@
+{
+	"$schema": "../../node_modules/wrangler/config-schema.json",
+	"compatibility_date": "2026-03-11",
+	"compatibility_flags": ["nodejs_compat"],
+	"name": "bridge-validator",
+	"account_id": "a12d2915bc16ee8550f19399839623f7",
+	"main": "src/index.ts",
+	"workers_dev": true,
+	"preview_urls": true,
+	"vars": {
+		"BRIDGE_VALIDATOR_BASE_URL": "https://bridge-validator.zeko-labs.workers.dev",
+		"BRIDGE_VALIDATOR_ENABLED": "true"
+	},
+	"observability": {
+		"traces": {
+			"enabled": true,
+			"destinations": ["zeko-traces"],
+			"head_sampling_rate": 1
+		},
+		"logs": {
+			"enabled": true,
+			"destinations": ["zeko-logs"],
+			"head_sampling_rate": 1
+		}
+	},
+	"triggers": {
+		"crons": ["0 */3 * * *"]
+	},
+	"workflows": [
+		{
+			"name": "bridge-validator",
+			"binding": "BRIDGE_VALIDATION_WORKFLOW",
+			"class_name": "BridgeValidationWorkflow"
+		}
+	],
+	"containers": [
+		{
+			"name": "bridge-validator-sandbox",
+			"class_name": "Sandbox",
+			"image": "./Dockerfile",
+			"instance_type": "standard-2",
+			"max_instances": 8,
+			"image_build_context": "../.."
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "Sandbox",
+				"class_name": "Sandbox"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["Sandbox"]
+		}
+	],
+	"limits": {
+		"cpu_ms": 300000
+	}
+}

@@ -30,7 +30,7 @@ const buildGraphqlClient = (payload: { data?: unknown; error?: unknown }): GqlCl
 		{ label: "test-client" }
 	)
 
-const buildBridge = () =>
+const buildBridge = ({ v2WithdrawalsStartIndex = UInt32.zero } = {}) =>
 	new Bridge({
 		config: bridgeConfig,
 		l1Client: buildGraphqlClient({}),
@@ -51,7 +51,7 @@ const buildBridge = () =>
 		bridgeFeeRecipientL2: otherOuterPk,
 		bridgeProofFee: UInt64.from(1),
 		V2_DEPOSITS_START_INDEX: UInt32.zero,
-		V2_WITHDRAWALS_START_INDEX: UInt32.zero
+		V2_WITHDRAWALS_START_INDEX: v2WithdrawalsStartIndex
 	} satisfies BridgeRuntime)
 
 const buildWithdrawalAction = ({
@@ -114,6 +114,7 @@ describe("withdrawal state", () => {
 		const result = await bridge.fetchWithdrawalsWithStates(recipient)
 
 		expect(result.withdrawals).toHaveLength(1)
+		expect(result.withdrawals[0]?.index).toBe(0)
 		expect(result.withdrawals[0]?.timestamp).toBe("")
 		expect(result.withdrawals[0]?.committed).toBe(false)
 		expect(result.withdrawals[0]?.finalised).toBe(false)
@@ -152,5 +153,62 @@ describe("withdrawal state", () => {
 		expect(result.withdrawals[0]?.timestamp).toBe("")
 		expect(result.withdrawals[0]?.committed).toBe(false)
 		expect(result.withdrawals[0]?.finalised).toBe(false)
+	})
+
+	it("marks unwitnessed withdrawals finalised when the helper account has advanced past them", async () => {
+		const bridge = buildBridge()
+		const bridgeInternals = bridge as unknown as {
+			fetchUserWithdrawalActions: (pk: PublicKey) => Promise<Array<Action & Withdrawal>>
+			fetchAccount: (...args: unknown[]) => Promise<{ zkappState: string[] | null } | null>
+			fetchCurrentSlot: () => Promise<UInt32>
+		}
+
+		vi.spyOn(bridgeInternals, "fetchUserWithdrawalActions").mockResolvedValue([
+			buildWithdrawalAction({ index: 0, timestamp: "1700000000000" })
+		])
+		vi.spyOn(bridgeInternals, "fetchAccount").mockResolvedValue({
+			zkappState: ["0", "1"]
+		})
+		vi.spyOn(bridgeInternals, "fetchCurrentSlot").mockResolvedValue(UInt32.from(100))
+		vi.spyOn(utils, "fetchInnerWitnessesFromAuxes").mockResolvedValue([])
+		vi.spyOn(utils, "fetchCommitAsePastSlot").mockResolvedValue({
+			commit: null,
+			ase: []
+		})
+
+		const result = await bridge.fetchWithdrawalsWithStates(recipient)
+
+		expect(result.withdrawals).toHaveLength(1)
+		expect(result.withdrawals[0]?.index).toBe(0)
+		expect(result.withdrawals[0]?.committed).toBe(true)
+		expect(result.withdrawals[0]?.finalised).toBe(true)
+		expect(result.committedIndex).toBe(-1)
+		expect(result.finalisedIndex).toBe(0)
+	})
+
+	it("keeps unwitnessed withdrawal actions in queue state", async () => {
+		const bridge = buildBridge({ v2WithdrawalsStartIndex: UInt32.from(1) })
+		const bridgeInternals = bridge as unknown as {
+			fetchUserWithdrawalActions: (pk: PublicKey) => Promise<Array<Action & Withdrawal>>
+			fetchAccount: (...args: unknown[]) => Promise<{ zkappState: string[] | null } | null>
+			fetchCurrentSlot: () => Promise<UInt32>
+		}
+
+		vi.spyOn(bridgeInternals, "fetchUserWithdrawalActions").mockResolvedValue([
+			buildWithdrawalAction({ index: 0, timestamp: "1700000000000" }),
+			buildWithdrawalAction({ index: 1, timestamp: "1700000001000" })
+		])
+		vi.spyOn(bridgeInternals, "fetchAccount").mockResolvedValue(null)
+		vi.spyOn(bridgeInternals, "fetchCurrentSlot").mockResolvedValue(UInt32.from(100))
+		vi.spyOn(utils, "fetchInnerWitnessesFromAuxes").mockResolvedValue([])
+		vi.spyOn(utils, "fetchCommitAsePastSlot").mockResolvedValue({
+			commit: null,
+			ase: []
+		})
+
+		const result = await bridge.fetchWithdrawalsWithStates(recipient)
+
+		expect(result.withdrawals.map((withdrawal) => withdrawal.index)).toEqual([0, 1])
+		expect(result.withdrawals.map((withdrawal) => withdrawal.bridgeVersion)).toEqual([1, 2])
 	})
 })

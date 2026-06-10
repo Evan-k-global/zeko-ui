@@ -1,0 +1,466 @@
+---
+id: T287
+title: "Bridge validator service only"
+status: done
+blockedBy: []
+owner: codex
+created_at: 2026-05-25T21:28:00Z
+updated_at: 2026-06-10T06:29:39Z
+---
+
+## Requirements
+
+- Keep PR #150 scoped to the Cloudflare bridge validator service.
+- Target PR #150 at `main`; the SDK/CLI prerequisite PR has merged and must not remain as PR #150's base.
+- Run one scheduled deposit route and one scheduled withdrawal route through the deployed Worker, Workflow, and Sandbox path.
+- Execute the published `zeko-bridge` binary directly from the container, without using local workspace code, direct `node` entrypoints, pinned CLI versions, or `npm exec` as the bridge invocation.
+- Enforce a 2 hour Workflow hard stop, keep the sandbox command below that limit, and ensure the Workflow reaches a terminal success or failure callback.
+- Destroy the sandbox on success, validation failure, command failure, callback timeout, or runtime failure.
+- Protect all Worker HTTP surfaces with bearer-token authentication.
+- Keep runtime documentation and Moon tasks aligned with the actual operational commands.
+- Keep the scheduled validator cadence controlled by Wrangler configuration.
+- Align bridge deposit and withdrawal retry behavior: retry recoverable setup, status, capability, and mutation failures with exponential backoff for 5 retries, then exit with a useful error.
+- Treat `Circuits config not found` and `No key returned from mutation` as bounded-retry failures, not infinite waits or immediate hard exits.
+- Avoid growing the bridge queue by clearing exactly one existing queued operation for the route/account before submitting a new operation, and return success once that queued operation is resolved.
+- Add a source-build validator path for Cloudflare Sandbox PR validation so unpublished SDK/CLI changes can be tested by cloning and building source instead of waiting for an npm release.
+- Move long stderr diagnostics out of Slack message blocks into Slack text snippet uploads while keeping stdout inline.
+- Keep the CLI reliability changes in PR #150 because the validator must work with these changes before deployment.
+- Replace every current infinite bridge retry path with the same bounded exponential retry policy, not just the two named error strings.
+- Add simple validator runtime configuration to disable scheduled runs, choose the source branch/ref for PR-built validation, and manually start one run.
+- Prove one deployed validator instance can run with PR-built source configuration without failing in the harness/setup path.
+
+## Test Plan
+
+- BDD. The service tests describe the required runtime contract first: scheduled route fanout, command construction, callback behavior, auth, status diagnostics, result parsing, history-log validation, Slack output, and cleanup.
+- Local gates: `moon run bridge-validator:test -f`, `moon run bridge-validator:typecheck -f`, `moon run bridge-validator:lint -f`, `moon run bridge-validator:build -f`.
+- CLI gates for runtime behavior changes: `moon run bridge-cli:test -f`, `moon run bridge-cli:typecheck -f`, and `moon run bridge-cli:lint -f`.
+- Cloudflare gate: deploy the service, trigger exactly one deposit workflow through `bridge-validator:trigger-deposit`, and inspect the Workflow instance plus status endpoint.
+- Final acceptance requires one deployed deposit and one deployed withdrawal to complete with `operation_id`, final hash, log path, and reporting output.
+
+## RED Evidence
+
+- PR #150 previously mixed validator service work with SDK/CLI changes, making validator review depend on package code that belongs in a separate PR.
+- Early validator attempts did not exercise the deployed Cloudflare path reliably; local CLI runs alone were insufficient.
+- The first deployed sandbox runner could exit without delivering a Workflow callback, leaving the Workflow waiting.
+- Cloudflare workflow `20944a35-90cc-4c13-abd3-f606fcca1c86` remained waiting for 7 hours while `/bridge-status?instanceId=20944a35-90cc-4c13-abd3-f606fcca1c86&logs=1` reported no process and no diagnostic files; the Workflow must detect that deployed sandbox failure mode without local babysitting.
+- The status endpoint initially exposed only process presence, so it could not explain missing callbacks.
+- The Worker HTTP surface was unauthenticated.
+- The validator docs drifted into manual Wrangler commands and unrelated local secret details instead of the actual service contract.
+
+## GREEN Evidence
+
+- PR split completed:
+  - PR-A: SDK/CLI prerequisite branch `branch/bridge-sdk-cli-validator-base`.
+  - PR-B: validator-only branch `branch/feature-web-397-bridge-validator-e2e`.
+  - PR #150 was later retargeted to `main` after PR-A merged.
+  - The validator task was renumbered from `T252` to `T253` because `main` already had a separate `T252`.
+- Local service validation passed on the split branch:
+  - `moon run bridge-validator:test -f`: 4 files passed.
+  - `moon run bridge-validator:typecheck -f`: passed.
+  - `moon run bridge-validator:lint -f`: passed.
+  - `moon run bridge-validator:build -f`: passed with the existing `tsdown` deprecation warning.
+- Deployed Cloudflare path was exercised for deposit:
+  - Workflow instance `37f4fe25-24c3-4a60-b0b7-cbb27ffdb62a` launched sandbox process `159` but remained waiting after the process disappeared.
+  - Diagnostics were added to expose sandbox PID, process log, stdout, and stderr tails through `/bridge-status`.
+  - Workflow instance `d2897e62-7f4b-4fbd-bd73-fb9d6d52fb1f` showed the detached process could still disappear without a callback.
+  - The launch command was fixed to pass callback and wallet environment directly to the detached runner.
+  - Workflow instance `80b423c6-e1bb-48ae-a813-4cf135fc3fe4` reached the callback step, reported command stdout/stderr, sent Slack failure output, and destroyed the sandbox.
+- Current deployed blocker:
+  - `80b423c6-e1bb-48ae-a813-4cf135fc3fe4` failed at `parse bridge result` because the published CLI callback returned `exitCode: 0`, empty stdout, and only npm notices on stderr.
+  - This proves the deployed Worker/Workflow/Sandbox path is wired, but a successful deposit cannot be captured until the fixed CLI entrypoint is published as npm latest.
+- Cleanup pass validation:
+  - Restored this task with the PR split, deployed-path attempts, callback evidence, current blocker, and remaining live-validation work.
+  - Removed unrelated root-env guidance from operator docs.
+  - Moved Workflow/request/env code out of `src/index.ts`, added bearer auth for Worker HTTP endpoints, switched the bridge invocation to direct `zeko-bridge`, added Moon operator tasks, removed manual `env.d.ts`, and set the sandbox instance type to `lite`.
+  - `moon run bridge-validator:test -f`: 4 files passed, 20 tests passed.
+  - `moon run bridge-validator:typecheck -f`: passed.
+  - `moon run bridge-validator:lint -f`: passed.
+  - `moon run bridge-validator:build -f`: passed with the existing `tsdown` `resolve.tsconfigFilename` deprecation warning.
+  - `moon run bridge-validator:type-cf -f`: passed and regenerated Worker types from Wrangler config.
+  - `git diff --check`: passed.
+- `codex-review` findings accepted and fixed:
+  - Removed secret environment serialization from the sandbox launch command; secrets are passed only through the `sandbox.exec` environment.
+  - Changed Slack success reporting to fail the Workflow if Slack rejects the success message.
+  - Reran `moon run bridge-validator:test -f`: 4 files passed, 21 tests passed.
+  - Reran `moon run bridge-validator:typecheck -f`: passed.
+  - Reran `moon run bridge-validator:lint -f`: passed.
+  - Reran `moon run bridge-validator:build -f`: passed with the existing `tsdown` `resolve.tsconfigFilename` deprecation warning.
+- Second `codex-review` findings accepted and fixed:
+  - Shortened the sandbox command timeout to 115 minutes under the 2 hour Workflow wait, leaving 5 minutes for timeout callbacks and failure reporting.
+  - Replaced the hard-coded callback host with `BRIDGE_VALIDATOR_BASE_URL` from Wrangler configuration so non-production deployments can route callbacks to their own Worker.
+  - Reran `moon run bridge-validator:type-cf -f`: passed and regenerated Worker types from Wrangler config.
+  - Reran `moon run bridge-validator:test -f`: 4 files passed, 22 tests passed.
+  - Reran `moon run bridge-validator:typecheck -f`: passed.
+  - Reran `moon run bridge-validator:lint -f`: passed.
+  - Reran `moon run bridge-validator:build -f`: passed with the existing `tsdown` `resolve.tsconfigFilename` deprecation warning.
+- Third `codex-review` finding accepted and fixed:
+  - Pinned `@cloudflare/sandbox` to `0.7.21` and updated the Docker image to `cloudflare/sandbox:0.7.21` so the SDK and container versions match.
+  - Added a regression test that fails if the SDK dependency and Docker image tag drift.
+  - Reran `moon run bridge-validator:test -f`: 5 files passed, 23 tests passed.
+  - Reran `moon run bridge-validator:typecheck -f`: passed.
+  - Reran `moon run bridge-validator:lint -f`: passed.
+- Fourth `codex-review` finding accepted and fixed:
+  - Disabled Moon cache for live operator tasks so secret syncs, workflow triggers, instance listing, instance describes, and status requests always execute.
+  - Reran `moon run bridge-validator:test -f`: 5 files passed, 23 tests passed.
+  - Reran `moon run bridge-validator:typecheck -f`: passed.
+  - Reran `moon run bridge-validator:lint -f`: passed.
+  - Reran `moon run bridge-validator:build -f`: passed with the existing `tsdown` `resolve.tsconfigFilename` deprecation warning.
+  - Reran `git diff --check`: passed.
+  - Verified `moon task bridge-validator:trigger-deposit --json` reports `"cache": false`.
+- Final `codex-review` rerun attempted after the Moon cache fix and was blocked by the Codex usage limit before producing findings: `try again at 11:27 AM`.
+- PR #150 was retargeted from `branch/bridge-sdk-cli-validator-base` to `main` after PR-A merged.
+- Merge conflicts from `origin/main` were resolved:
+  - Kept SDK/CLI behavior from `main`; validator PR #150 no longer carries PR-A package changes.
+  - Renumbered this validator task from `T252` to `T253` because `main` already contains `T252`.
+  - Removed merged SDK/CLI artifacts from the PR #150 diff.
+- Latest `codex-review` findings accepted and fixed:
+  - Failed sandbox launcher executions now fail the Workflow immediately instead of returning an empty process id and waiting for the hard timeout.
+  - Completed bridge commands now disarm the watchdog before callback retries, preserving the original CLI exit code if callback reporting cannot be delivered within the grace window.
+  - Reran `moon run bridge-validator:test -f`: 5 files passed, 25 tests passed.
+  - Reran `moon run bridge-validator:typecheck -f`: passed.
+  - Reran `moon run bridge-validator:lint -f`: passed.
+  - Reran `moon run bridge-validator:build -f`: passed with the existing `tsdown` `resolve.tsconfigFilename` deprecation warning.
+  - Reran `git diff --check`: passed.
+- Next `codex-review` findings accepted and fixed:
+  - Status diagnostics now use a non-keepalive sandbox handle, so mistyped or completed `instanceId` lookups do not create leaked keep-alive sandboxes.
+  - Workflow callbacks now use a per-run event type derived from the callback token, so a wrong-token callback cannot resume and fail the active wait before the real sandbox callback arrives.
+  - Reran `moon run bridge-validator:test -f`: 5 files passed, 27 tests passed.
+  - Reran `moon run bridge-validator:typecheck -f`: passed.
+  - Reran `moon run bridge-validator:lint -f`: passed.
+  - Reran `moon run bridge-validator:build -f`: passed with the existing `tsdown` `resolve.tsconfigFilename` deprecation warning.
+  - Reran `git diff --check`: passed.
+- User cleanup pass:
+  - Removed token-bearing status command docs; status tasks now read `VALIDATOR_API_TOKEN` from the repo `.env`.
+  - Replaced the Bash secret sync script with Nu scripts for secret sync and status requests.
+  - Removed the README wording test and kept behavior/script/runtime tests.
+  - Moved the bridge CLI package/version into `services/bridge-validator/package.json`; runtime code and Dockerfile now derive from that metadata.
+  - Replaced custom Worker env value trimming/validation with Valibot.
+  - Verified `origin/main...HEAD` includes no `packages/bridge-cli`, `packages/bridge-sdk`, or `.changeset` files.
+  - Reran `nu scripts/sync-secrets.nu --help`: passed.
+  - Reran `nu scripts/status.nu --help`: passed.
+  - Reran `pnpm install`: passed.
+  - Reran `moon run bridge-validator:test -f`: 4 files passed, 26 tests passed.
+  - Reran `moon run bridge-validator:typecheck -f`: passed.
+  - Reran `moon run bridge-validator:lint -f`: passed.
+  - Reran `moon run bridge-validator:build -f`: passed with the existing `tsdown` `resolve.tsconfigFilename` deprecation warning.
+  - Reran `git diff --check`: passed.
+- Slack timing cleanup:
+  - Added sandbox callback timing for the exact published CLI command duration.
+  - Added Workflow phase timings for the measured validation steps and includes them in success, process failure, validation failure, and runtime failure reporting.
+  - Replaced plain Slack-only output with Block Kit success/failure payloads, structured route/evidence fields, final transaction explorer links when available, and exact millisecond durations.
+  - Updated README/AGENTS runtime docs so operators expect Slack success/failure reports with workflow, command, and step timing.
+  - Reran `moon run bridge-validator:test -f`: 4 files passed, 28 tests passed.
+  - Reran `moon run bridge-validator:typecheck -f`: passed.
+  - Reran `moon run bridge-validator:lint -f`: passed.
+  - Reran `moon run bridge-validator:build -f`: passed with the existing `tsdown` `resolve.tsconfigFilename` deprecation warning.
+  - Reran `git diff --check`: passed.
+- Cloudflare deposit validation pass:
+  - Deployed Worker version `1be80707-903f-478b-8b5a-4f92494a6f2d`.
+  - Added application-level Sandbox control timeouts, HTTP status timeouts, and an authenticated `/bridge-cleanup` route after Cloudflare Sandbox startup/control calls were observed hanging during terminated attempts.
+  - Added `BRIDGE_VALIDATOR_WALLET_PRIVATE_KEY` support so Cloudflare validation uses a dedicated funded wallet instead of implicitly selecting shared numbered bridge test keys with unrelated queues.
+  - Synced Cloudflare secrets from the repo-root `.env` through `moon run bridge-validator:sync-secrets -f`.
+  - Destroyed stale Sandboxes for terminated attempts with `moon run bridge-validator:cleanup -f`.
+  - Triggered exactly one clean dedicated-wallet deposit workflow after cleanup: `7ccba267-7e54-41d7-9722-70919e0aec62`.
+  - Workflow `7ccba267-7e54-41d7-9722-70919e0aec62` completed successfully through Cloudflare Worker, Workflow, and Sandbox.
+  - CLI operation id: `794e477f-6ec0-479c-bf02-b2824c8712c3`.
+  - Submitted deposit hash: `5Jthv81XKtFQX2UiaNqjJoRzQeBoPxmJYVQ4aKfjGDK3VtxDDc5r`.
+  - Final transaction hash: `5JvExzCAP97JitHX2kReCKjbKEWAfJdomJGjHZrdSpWf7rrbLay2`.
+  - History log path: `/workspace/state/zeko-bridge/logs/794e477f-6ec0-479c-bf02-b2824c8712c3.jsonl`.
+  - Workflow success reporting step `report bridge validation success-1` succeeded.
+  - Workflow cleanup step `destroy bridge sandbox-1` succeeded.
+  - The deposit command ran from `2026-05-26T16:29:15.898Z` to `2026-05-26T17:57:36.946Z`.
+- Current reliability cleanup:
+  - Moved the validator cron cadence into Wrangler configuration.
+  - Added a bounded exponential retry helper for bridge CLI setup/status/capability/mutation operations: 5 retries, 6 total attempts, then a concrete failure.
+  - Aligned deposit and withdrawal behavior for `Circuits config not found` and `No key returned from mutation` so they do not retry indefinitely or hard-exit inconsistently.
+  - Changed the high-level withdrawal flow to inspect the queue before submitting, matching deposit behavior.
+  - Changed the high-level bridge flow to resolve exactly one pre-existing queued operation and return success without submitting another operation.
+  - Added an explicit Cloudflare Sandbox source-build path for PR validation before SDK/CLI publication: clone source, build `bridge-cli`, then run the built CLI.
+  - Changed Slack failure reporting to keep stdout inline and upload stderr as a Slack text snippet.
+  - `moon run bridge-cli:test -f`: 22 files passed, 111 tests passed, 13 skipped.
+  - `moon run bridge-cli:typecheck -f`: passed.
+  - `moon run bridge-cli:lint -f`: passed.
+  - `moon run bridge-cli:build -f`: passed with the existing `tsdown` `resolve.tsconfigFilename` deprecation warning.
+  - `moon run bridge-validator:test -f`: 4 files passed, 33 tests passed.
+  - `moon run bridge-validator:typecheck -f`: passed.
+  - `moon run bridge-validator:lint -f`: passed.
+  - `moon run bridge-validator:build -f`: passed with the existing `tsdown` `resolve.tsconfigFilename` deprecation warning.
+  - `moon run bridge-validator:type-cf -f`: passed and regenerated Worker types from Wrangler config.
+  - `git diff --check`: passed.
+- Latest PR-built Cloudflare validation:
+  - Reauthenticated Wrangler and confirmed access to Cloudflare account `a12d2915bc16ee8550f19399839623f7`.
+  - Deployed Worker version `a8c812ce-f12e-4439-b05d-e5eeb9964b6a`, then triggered deposit workflow `bridge-validator-manual-mina-to-zeko-1780310070670`.
+  - Workflow `bridge-validator-manual-mina-to-zeko-1780310070670` cloned `branch/feature-web-397-bridge-validator-e2e`, checked out `d4b1de3`, installed only the bridge CLI workspace dependency graph, built `bridge-sdk`, built `bridge-cli`, and reached CLI initialization in the Cloudflare Sandbox.
+  - That run proved the PR-built source path no longer fails in harness setup, then failed during SDK runtime initialization with `operation_id=ecb0b15b-9dcc-4b75-9f55-d97e3b3839db`, `submitted_transactions=[]`, `final_transaction=null`, and `log_path=/workspace/state/zeko-bridge/logs/ecb0b15b-9dcc-4b75-9f55-d97e3b3839db.jsonl`.
+  - Added SDK runtime diagnostics so missing runtime config errors include the exact GraphQL endpoint and query name instead of only `Circuits config not found`.
+  - `moon run bridge-sdk:test -f`: 12 files passed, 50 tests passed.
+  - `moon run bridge-sdk:typecheck -f`: passed.
+  - Committed and pushed `946ba11` with the SDK diagnostic fix and a changeset.
+  - Deployed Worker version `b9368eee-cbe7-46e7-851d-f2b3056f864d`.
+  - Direct endpoint poll from `2026-06-01T10:48:00Z` through `2026-06-01T11:17:18Z` returned HTTP 502 for `POST https://testnet.zeko.io/graphql` with `query SequencerPK { sequencerPk }`.
+  - Direct archive check against `POST https://archive.testnet.zeko.io/graphql` returned HTTP 200 for `query NetworkState`, so the observed outage is specific to the live Zeko GraphQL endpoint used for `sequencerPk` and `circuitsConfig`.
+  - Triggered latest deployed deposit workflow `bridge-validator-manual-mina-to-zeko-1780312463205` against Worker version `b9368eee-cbe7-46e7-851d-f2b3056f864d`.
+  - Workflow `bridge-validator-manual-mina-to-zeko-1780312463205` checked out `946ba11`, built the PR source, reached CLI initialization, retried the SDK call with bounded exponential backoff, then exited after 6 total attempts with `operation_id=dd56b218-2670-4115-b630-896530e46c96`.
+  - Latest failure evidence: `log_path=/workspace/state/zeko-bridge/logs/dd56b218-2670-4115-b630-896530e46c96.jsonl`, `submitted_transactions=[]`, `final_transaction=null`, `cli_error=getDepositStatuses failed after 6 attempts: GraphQL query FetchConfig failed at https://testnet.zeko.io/graphql: [Network] Bad Gateway; networkError=Bad Gateway`.
+  - Latest Workflow failure notification step `notify slack validation failure-1` succeeded.
+  - Latest Workflow cleanup step `destroy bridge sandbox-1` succeeded.
+- Slack stderr attachment cleanup:
+  - Removed the placeholder sentence `stderr is uploaded as a Slack text snippet when present` from Slack failure messages.
+  - Changed stderr snippet uploads to use the failure message timestamp as `thread_ts`, so stderr is attached in the failure message thread instead of being posted as an unrelated channel file.
+  - `moon run bridge-validator:test -f`: 4 files passed, 34 tests passed.
+  - `moon run bridge-validator:typecheck -f`: passed.
+  - `moon run bridge-validator:lint -f`: passed.
+  - `git diff --check`: passed.
+- Slack stdout/stderr file upload cleanup:
+  - Replaced the remaining inline stdout / stderr snippet behavior with Slack-hosted text file uploads for both `stdout.log` and `stderr.log`, posted in the failure message thread through `files.getUploadURLExternal` and `files.completeUploadExternal`.
+  - Verified the configured Slack app needed the `files:write` bot scope for diagnostic uploads.
+  - Updated README and AGENTS runtime notes so operators expect stdout/stderr Slack files instead of inline stdout or stderr snippets.
+  - `moon run bridge-validator:test -f`: 4 files passed, 35 tests passed.
+  - `moon run bridge-validator:typecheck -f`: passed.
+  - `moon run bridge-validator:lint -f`: passed.
+  - `moon run bridge-validator:build -f`: passed with the existing `tsdown` `resolve.tsconfigFilename` deprecation warning.
+  - `git diff --check`: passed.
+- Slack file upload verification:
+  - Real Slack API probe with the configured bot token and channel initially failed at `files.getUploadURLExternal` with `missing_scope`, `needed=files:write`, and `provided=chat:write,channels:read,groups:read`.
+  - After the Slack app OAuth scopes were updated, the real Slack API probe succeeded through `files.getUploadURLExternal`, direct `upload_url` byte upload, and `files.completeUploadExternal`.
+  - Verified uploaded file id `F0B7QDWTR1A` was shared in Slack channel `C0AKUKMTWMB` as a thread reply with `thread_ts=1780368182.037609`.
+  - Updated the service so diagnostic upload failures are reported in the Slack failure thread instead of silently logging only to Worker stderr.
+  - `moon run bridge-validator:test -f`: 4 files passed, 35 tests passed.
+  - `moon run bridge-validator:typecheck -f`: passed.
+  - `moon run bridge-validator:lint -f`: passed.
+- Sandbox supervisor fix:
+  - Deployed Worker version `8b089471-cc43-436b-8532-60f082a3e898`.
+  - Triggered withdrawal workflow `bridge-validator-manual-zeko-to-mina-1780368510357`.
+  - Workflow prepared source in 41 seconds and started command PID `292`, but first inspection found no command marker and diagnostics were all null: no `bridge.pid`, `stdout.json`, `stderr.log`, or `process.log`.
+  - Root cause: fast command failures could let the detached shell exit before the Workflow collected diagnostics, causing the sandbox filesystem state to disappear.
+  - Fixed the launched bridge runner to remain alive as a small TERM-aware supervisor after writing `exit-code.txt`, so the Workflow can read stdout/stderr/exit/timing files before cleanup destroys the sandbox.
+  - `moon run bridge-validator:test -f`: 4 files passed, 35 tests passed.
+  - `moon run bridge-validator:typecheck -f`: passed.
+  - `moon run bridge-validator:lint -f`: passed.
+  - `moon run bridge-validator:build -f`: passed with the existing `tsdown` `resolve.tsconfigFilename` deprecation warning.
+  - `git diff --check`: passed.
+- PR-built withdrawal index fix:
+  - Triggered deployed withdrawal workflow `bridge-validator-manual-zeko-to-mina-1780366519190` against Worker version `2c985784-cc24-4dc8-84a5-b3c551abb62d`.
+  - The workflow cloned the pushed PR branch, built `bridge-sdk` and `bridge-cli`, started the CLI, and submitted withdrawal hash `5Ju5jzjKjj4pcRqANLezxvHRfnGmZ12RXoYDBx3bb5fkeH43Buob`.
+  - Runtime diagnostics showed both live and archive withdrawal status endpoints observing the submitted hash, but the CLI stayed in `waiting-submission` with `targetIndex=-1`.
+  - Destroyed the stuck sandbox `bridge-validator-bridge-validator-manual-1-1ce4i3z` through `/bridge-cleanup`.
+  - Added a RED test proving `fetchWithdrawalsWithStates` returned `index=-1` for an indexed withdrawal action without an Actions API witness.
+  - Fixed `fetchWithdrawalsWithStates` so provisional withdrawal statuses preserve the action index while staying `committed=false` and `finalised=false`.
+  - Added changeset `.changeset/quiet-withdrawals-remember.md`.
+  - `pnpm --dir packages/bridge-sdk exec vitest run test/withdrawal-state.test.ts`: failed before the fix with `expected -1 to be +0`, then passed after the fix.
+  - `pnpm exec moon run bridge-sdk:test -f`: 12 files passed, 50 tests passed.
+  - `pnpm exec moon run bridge-cli:test -f`: 22 files passed, 111 tests passed, 13 skipped.
+  - `pnpm exec moon run bridge-sdk:typecheck -f`: passed.
+  - `pnpm exec moon run bridge-sdk:lint -f`: passed with existing `src/types.ts` `noExplicitAny` warnings.
+  - `pnpm exec moon run bridge-cli:typecheck -f`: passed.
+  - `pnpm exec moon run bridge-cli:lint -f`: passed.
+  - `pnpm exec moon run bridge-sdk:build -f`: passed with the existing `tsdown` `resolve.tsconfigFilename` deprecation warning.
+  - `pnpm exec moon run bridge-cli:build -f`: passed with the existing `tsdown` `resolve.tsconfigFilename` deprecation warning.
+  - `git diff --check`: passed.
+- PR-built withdrawal queue-state fixes:
+  - Triggered deployed withdrawal workflow `bridge-validator-manual-zeko-to-mina-1780368852499` against Worker version `21cd89dc-5486-4644-a642-15a8a4c7ece1`.
+  - The sandbox supervisor fix kept diagnostics alive: PID `292`, stdout, and stderr were readable through `/bridge-status`.
+  - Cloudflare diagnostics showed the CLI still waiting at `waiting-submission`, `targetIndex=0`, and observed withdrawal hash `5Ju5jzjKjj4pcRqANLezxvHRfnGmZ12RXoYDBx3bb5fkeH43Buob`.
+  - SDK investigation with the validator wallet showed withdrawal index `0`, hash `5Ju5jzjKjj4pcRqANLezxvHRfnGmZ12RXoYDBx3bb5fkeH43Buob`, amount `2000000000`, `committed=false`, `finalised=false`, aggregate `committedIndex=-1`, and aggregate `finalisedIndex=0`.
+  - SDK `canFinalizeWithdrawal` returned `available=false`, `reason="No withdrawal witnesses found"`, `status="waiting"`, `index=undefined`.
+  - Direct Actions API evidence: `POST https://api.actions.zeko.io/graphql`, operation `FetchInnerWitnessesFromAuxes`, variables `auxes=["16385132513779525086752585207967168710839667157436946764012138256052728626960"]`, returned HTTP 200 with `innerWitnessesFromAuxes=[]`.
+  - Runtime evidence: testnet `V2_WITHDRAWALS_START_INDEX=10529`, so withdrawal index `0` is a legacy pre-V2 action and must not block the current validator queue.
+  - Added a RED SDK test for an unwitnessed withdrawal whose helper account has `nextWithdrawal=1`; it failed with `expected false to be true`.
+  - Fixed `fetchWithdrawalsWithStates` so unwitnessed/provisional withdrawals are marked `finalised=true` when the helper account has advanced past their index, and `committed=true` when finalised.
+  - `pnpm --dir packages/bridge-sdk exec vitest run test/withdrawal-state.test.ts`: failed before the fix, then passed after the fix.
+  - `pnpm exec moon run bridge-sdk:test -f`: 12 files passed, 51 tests passed.
+  - `pnpm exec moon run bridge-cli:test -f`: 22 files passed, 111 tests passed, 13 skipped.
+  - `pnpm exec moon run bridge-sdk:typecheck -f`: passed.
+  - `pnpm exec moon run bridge-sdk:lint -f`: passed with existing `src/types.ts` `noExplicitAny` warnings.
+  - `pnpm exec moon run bridge-cli:typecheck -f`: passed.
+  - `pnpm exec moon run bridge-cli:lint -f`: passed.
+  - `pnpm exec moon run bridge-sdk:build -f`: passed with the existing `tsdown` `resolve.tsconfigFilename` deprecation warning.
+  - `pnpm exec moon run bridge-cli:build -f`: passed with the existing `tsdown` `resolve.tsconfigFilename` deprecation warning.
+  - `git diff --check`: passed.
+- PR-built withdrawal provisional-index correction:
+  - Triggered deployed withdrawal workflow `bridge-validator-manual-zeko-to-mina-1780370294698` after pushing the provisional queue-index fix.
+  - The deployed source-build path cloned the pushed PR branch, built the CLI source, started PID `291`, and submitted withdrawal hash `5JuPBdUPF4wiD7jWG4qpmZU877zikzqAdRBGT3JecRQcCnxnej1H`.
+  - Cloudflare status then showed `withdrawalStatusCount=0` and `submitObserved=false` even after the archive saw the submitted withdrawal, proving that filtering provisional withdrawals by local action index was incorrect.
+  - SDK diagnosis showed both validator withdrawals shared aux `16385132513779525086752585207967168710839667157436946764012138256052728626960`; direct `POST https://api.actions.zeko.io/graphql`, operation `FetchInnerWitnessesFromAuxes`, returned HTTP 200 with `innerWitnessesFromAuxes=[]`.
+  - Corrected the queue-state test to prove unwitnessed withdrawals remain visible until an Actions API witness provides a real global index.
+- SDK-example-first endpoint validation:
+  - Built and ran repository SDK examples with the validator wallet before running more CLI recovery.
+  - With the current default `ACTIONS_API_URL=https://api.actions.zeko.io/graphql`, `canFinalizeWithdrawal` returned `available=false`, `reason="No withdrawal witnesses found"`, and `diagnoseHistory` reported 0 deposit witnesses and 0 withdrawal witnesses.
+  - The SDK `finalizeWithdrawal` example failed before signing with `Did not find any withdrawal to finalize`; `finalizeDeposit` failed before signing with `No deposit witnesses found`.
+  - Re-running the same SDK examples with `ACTIONS_API_URL=https://testnet.api.actions.zeko.io/graphql` returned withdrawal finalization availability at index `10551`, 4 matched deposit witnesses, and 2 matched withdrawal witnesses.
+  - The CLI second check against the old default endpoint reused persisted operation `fdc0f3e3-1333-469f-88c6-1a5af0516a9e` and waited on the existing withdrawal rather than submitting a fresh operation.
+  - After patching the testnet Actions API default, the SDK `canFinalizeWithdrawal` example returned `available=true`, `index=10551` without an endpoint override.
+  - Removed speculative SDK source edits after live validation did not prove them; there are no remaining `packages/bridge-sdk/src` changes in this cleanup pass.
+  - SDK `finalizeWithdrawal` was re-run through the repository example path. The queue later reported `alreadyFinalised`, `prevNextWithdrawal=10553`, `index=10552`, proving the existing withdrawal queue item had cleared.
+  - SDK `finalizeDeposit` was re-run through the repository example path and returned `No finalizable deposit found`.
+  - SDK `diagnoseHistory` with the testnet Actions API reported 4 matched deposit witnesses and 2 matched withdrawal witnesses for the validator wallet.
+  - CLI second queue-only validation passed after SDK checks:
+    - `operation resume-all --from zeko:testnet --to mina:testnet --json --verbose` returned `operations_found=0`, `operations_resolved=0`.
+    - `operation resume-all --from mina:testnet --to zeko:testnet --json --verbose` returned `operations_found=0`, `operations_resolved=0`.
+  - Fresh-operation gate satisfied: SDK and CLI both reported empty queues before starting a new operation.
+  - Edited SDK submit examples only to use exactly 2 MINA (`2_000_000_000` nanomina).
+  - SDK `submitDeposit` example succeeded with hash `5JtthdEUsGPN9mvbYn9VbHcm8EGvLppPM5HU9GtmkiMEW49zc3DW`.
+  - First SDK `canFinalizeDeposit` poll after that fresh deposit returned `available=false`, `reason="No finalizable deposit found"`; next poll is spaced by 10 minutes.
+  - Later SDK `canFinalizeDeposit` and `finalizeDeposit` attempts returned `Deposit is not finalizable yet; an earlier deposit must be resolved first`.
+  - SDK `fetchOuterActions` example clarified the state: prior validator-wallet deposits are finalised through index `72089`; the fresh 2 MINA deposit is index `73547`, `synced=false`, `accepted=false`, `confirmed=false`, `finalised=false`, with `syncedIndex=73543`, `acceptedIndex=73541`, and `confirmedIndex=73535`.
+  - CLI second was briefly started after the SDK checks and found the same existing fresh deposit without submitting a new operation: `operationId=541c9749-4beb-46d6-a60c-1667523baee3`, `targetIndex=73547`, `submitted_transactions[0].hash=5JtthdEUsGPN9mvbYn9VbHcm8EGvLppPM5HU9GtmkiMEW49zc3DW`, `can_finalize=false`, `can_cancel=false`, `pending_ahead=0`.
+  - The local CLI process was terminated before it could finalize because the corrected validation order requires the SDK finalizer to process the fresh operation first.
+  - After the next 10 minute wait, SDK `finalizeDeposit` still returned the same not-finalizable reason. A follow-up SDK `fetchOuterActions` example showed progress but not completion: `syncedIndex=73546`, `acceptedIndex=73543`, `confirmedIndex=73537` for target deposit index `73547`.
+  - Subsequent SDK `fetchOuterActions` showed the fresh deposit became `synced=true`, with `acceptedIndex=73546` and `confirmedIndex=73540`; target index remained `73547`.
+  - Subsequent SDK `finalizeDeposit` reached the accepted-but-not-confirmed condition: `Deposit 73547 is accepted but not confirmed yet; confirmedIndex 73541 is behind deposit index 73547`.
+  - Subsequent SDK `finalizeDeposit` reached the finalization mutation path, then failed before a proving key was returned with `error: [Network] Bad Gateway` from `packages/bridge-sdk/src/deposits.ts:611`; same SDK example is being retried after a 10 minute wait.
+  - The same SDK finalization mutation failed a second time with `error: [Network] Bad Gateway`.
+  - Direct endpoint probes after the repeated mutation failure returned HTTP 200 for:
+    - `POST https://testnet.zeko.io/graphql`, `query SequencerPK`.
+    - `POST https://testnet.zeko.io/graphql`, `query FetchConfig`.
+    - `POST https://testnet.api.actions.zeko.io/graphql`, `query Health { __typename }`.
+  - A later SDK `fetchOuterActions` example confirmed the fresh deposit was fully ready but unresolved: `index=73547`, `synced=true`, `accepted=true`, `confirmed=true`, `finalised=false`, with `confirmedIndex=73548` and `finalisedIndex=72089`.
+  - CLI second was run against the existing operation only. It found `operationId=541c9749-4beb-46d6-a60c-1667523baee3`, `submitted_transactions[0].hash=5JtthdEUsGPN9mvbYn9VbHcm8EGvLppPM5HU9GtmkiMEW49zc3DW`, `claimIndex=73547`, and `canFinalizeDeposit available=true`.
+  - CLI `finalizeDeposit` then failed after 6 bounded attempts with the same network error: `finalizeDeposit failed after 6 attempts: [Network] Bad Gateway`; no new operation was submitted and `final_transaction=null`.
+  - Temporary example-helper fetch diagnostics, later reverted, confirmed the failing SDK `finalizeDeposit` mutation receives HTTP 502 responses from `https://testnet.zeko.io/graphql` with Cloudflare `error_name=origin_bad_gateway`, `retryable=true`, and `retry_after=60`.
+  - Final read-only SDK check still reports the deposit queue item is finalizable: `canFinalizeDeposit { available: true, reason: null, index: 73547 }`.
+- Sequencer fix revalidation on 2026-06-08:
+  - SDK `finalizeDeposit` no longer fails with Cloudflare 502. It now reaches the endpoint and returns a GraphQL circuit failure:
+    - `Constraint unsatisfied (unreduced)` in `src/app/zeko/circuits/rule_bridge_finalize_deposit.ml`.
+    - `Constraint: Equal(Var 163797)(Add(Var 139220)(Constant 1))`.
+    - `Data: Equal 73545 73549`.
+  - SDK read-only refresh then reported the same deposit hash `5JtthdEUsGPN9mvbYn9VbHcm8EGvLppPM5HU9GtmkiMEW49zc3DW` at index `73548`, with `synced=true`, `accepted=true`, `confirmed=true`, `finalised=false`; `canFinalizeDeposit` returned `available=true`, `index=73548`.
+  - SDK `finalizeDeposit` retried against the refreshed state and returned the same GraphQL circuit failure: `Data: Equal 73545 73549`.
+  - CLI `operation resume-all --from mina:testnet --to zeko:testnet` found the existing deposit only, did not submit a new operation, and matched SDK behavior:
+    - `operationId=541c9749-4beb-46d6-a60c-1667523baee3`.
+    - `targetIndex=73548`, `claimIndex=73548`, `canFinalizeDeposit available=true`.
+    - Failed with the same GraphQL circuit failure `Data: Equal 73545 73549`; `final_transaction=null`.
+  - SDK withdrawal verification:
+    - `canFinalizeWithdrawal` returned `available=false`, `reason="Withdrawal already finalised"`, `status="alreadyFinalised"`, `index=10552`.
+    - `fetchInnerActions` returned two 2 MINA withdrawals, indices `10551` and `10552`, both `committed=true` and `finalised=true`; aggregate `finalisedIndex=10552`.
+    - SDK `finalizeWithdrawal` returned `Did not find any withdrawal to finalize`.
+  - CLI withdrawal verification:
+    - `withdrawal status --from zeko:testnet --to mina:testnet --json --verbose --account <validator>` returned the same two withdrawals, indices `10551` and `10552`, both `committed=true` and `finalised=true`.
+    - Direct `withdrawal finalize --from zeko:testnet --to mina:testnet --json --verbose --account <validator> --no-wait` returned `Did not find any withdrawal to finalize`, matching the SDK example.
+  - CLI `operation resume-all --from zeko:testnet --to mina:testnet` intentionally discovered the unresolved deposit after finding no withdrawal queue work, because `resume-all` builds an account-level queue across both bridge directions and prioritizes the requested direction first.
+- Sequencer fix revalidation on 2026-06-09:
+  - SDK `finalizeDeposit` succeeded for the existing validator-wallet 2 MINA deposit.
+    - Submit hash: `5JtthdEUsGPN9mvbYn9VbHcm8EGvLppPM5HU9GtmkiMEW49zc3DW`.
+    - Final hash: `5JuUHMngqipejCKxVBBkR7L9j4ujiqQmThE3dzTQHQwaheDYUZE1`.
+  - CLI second check, `operation resume-all --from mina:testnet --to zeko:testnet`, found `operations_found=0`, `operations_resolved=0`, confirming the deposit queue was empty after SDK finalization.
+  - SDK queue checks after deposit finalization:
+    - `canFinalizeDeposit`: `available=false`, `reason="No finalizable deposit found"`.
+    - Validator-wallet `canFinalizeWithdrawal`: `available=false`, `reason="Withdrawal already finalised"`, `status="alreadyFinalised"`, `index=10552`.
+  - Validator wallet balances after deposit finalization were not enough for a fresh 2 MINA withdrawal (`L2=1.9 MINA`) or fresh 2 MINA deposit (`L1=0.6 MINA`), so the existing second wallet was checked instead of creating a new wallet.
+  - Existing wallet key 0 balances were sufficient for withdrawal validation (`L2=5.2357 MINA`, `L1=0.8293 MINA`), but its queue was not empty:
+    - SDK `canFinalizeWithdrawal`: `available=true`, `index=10543`.
+    - SDK `canFinalizeDeposit`: `available=true`, `index=72214`.
+  - SDK `submitWithdrawal` on the underfunded validator wallet failed before producing a hash with an endpoint GraphQL error on `provingResult`: Mina zkApp command logic `Overflow`.
+  - SDK `finalizeWithdrawal` on existing key-0 queue work succeeded:
+    - Finalized withdrawal index `10543`.
+    - Final hash: `5JtrVdNLQxF1yKzyPCjh8h6jkdEHMYQSwjFagkirE2YQsnNtpDEd`.
+  - CLI second withdrawal validation on key 0 matched SDK behavior and processed existing queue work only:
+    - It observed/completed the SDK-finalized withdrawal `10543`.
+    - It then finalized withdrawal `10544` with final hash `5JuGL47hs3DhutYSpNecKLd3wYi14NnZWFY3y4kwD6vpPJHDeH89`.
+    - It then finalized withdrawal `10546` with final hash `5Jte8aj26GJkBWC5PFGZ6umxy3am2gp7xSC4ygwHhHbzxbQGex5P`.
+    - The local CLI process was terminated after successful CLI withdrawal proof to avoid draining unrelated historical key-0 backlog; no bridge cancellation feature was used.
+- Deployed-validator preparation on 2026-06-09:
+  - Added a validator-service timing regression so the Workflow keeps the first sandbox command inspection at 30 seconds, then polls long-running bridge commands every 10 minutes.
+  - `moon run bridge-validator:test -f`: 4 files passed, 36 tests passed.
+  - `moon run bridge-validator:typecheck -f`: passed.
+  - `moon run bridge-validator:build -f`: passed with the existing `tsdown` `resolve.tsconfigFilename` deprecation warning.
+  - `pnpm --dir packages/bridge-cli exec vitest run tests/sdk-config.test.ts`: 1 file passed, 3 tests passed.
+  - Dedicated validator wallet remained `B62qmE663JH772AeC3LsSi6BUD6C3BK1KDUkqajtjyWAxaZZddQ2CE4`.
+  - Validator-wallet balances before top-up: Zeko L2 `1.9 MINA`; Mina L1 `0.6 MINA`.
+  - Existing key-0 balances: Zeko L2 `5.2357 MINA`; Mina L1 `3.6293 MINA`.
+  - Sent a native Zeko payment from key 0 to the dedicated validator wallet to fund a fresh 2 MINA validator withdrawal without switching the validator to key 0's historical queue:
+    - Hash: `5Jv871qJnTHskD3WDeA1mCq3MPFauCyPqxeUHhddx9H8CttRHoGV`.
+    - Amount: `2 MINA`; fee: `0.1 MINA`; nonce: `24`.
+  - Validator-wallet balances after top-up: Zeko L2 `3.9 MINA`; Mina L1 `0.6 MINA`.
+  - SDK queue checks before deployed validator trigger:
+    - `canFinalizeDeposit`: `available=false`, `reason="No finalizable deposit found"`.
+    - `canFinalizeWithdrawal`: `available=false`, `reason="Withdrawal already finalised"`, `status="alreadyFinalised"`, `index=10552`.
+- Deployed-validator revalidation on 2026-06-09:
+  - Pushed commit `b1633e2` to `branch/feature-web-397-bridge-validator-e2e` so the Cloudflare Sandbox source-build path could clone the same CLI defaults validated locally.
+  - Deployed Worker version `748b0b08-d3eb-4f71-b5ce-65da98c2afc6`.
+  - `moon run bridge-validator:sync-secrets -f`: synced `WALLET_PRIVATE_KEY`, `WALLET_PUBLIC_KEY`, `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID`, and `VALIDATOR_API_TOKEN` from the main worktree `.env`.
+  - Started exactly one deployed withdrawal workflow: `bridge-validator-manual-zeko-to-mina-1781023340577`.
+  - The workflow cloned the pushed PR branch, built the PR source, and started bridge command PID `285`.
+  - The Workflow poll cadence was verified in production: first inspection after 30 seconds, second inspection after 10 minutes.
+  - The bridge command exited with code `0` but returned `success=false` before submitting any withdrawal transaction:
+    - `operation_id=8ca3465c-f14b-445d-a81d-30b5f4ecf0d9`.
+    - `submitted_transactions=[]`.
+    - `final_transaction=null`.
+    - `log_path=/workspace/state/zeko-bridge/logs/8ca3465c-f14b-445d-a81d-30b5f4ecf0d9.jsonl`.
+    - Endpoint error: HTTP 200 GraphQL error at `provingResult`, path `src/lib/transaction_logic/zkapp_command_logic.ml`, line 2009, `Overflow`.
+  - Slack failure reporting succeeded via `notify slack validation failure-1`.
+  - Sandbox cleanup succeeded via `destroy bridge sandbox-1`.
+  - Additional native top-up was sent to the dedicated validator wallet after the failed deployed run:
+    - Zeko L2 top-up hash `5JvR7Ra3EfY461LszxFQV7QFijpM1qtzxHuzdgUuUqMUh4CDrUtd`, amount `2.5 MINA`, fee `0.1 MINA`, from key 0 nonce `25`.
+    - Validator-wallet Zeko L2 balance after top-up: `6.4 MINA`.
+  - SDK `submitWithdrawal` example retried against the dedicated validator wallet with `6.4 MINA` L2 balance and failed before producing a hash with the same HTTP 200 GraphQL `provingResult` `Overflow`.
+  - After a 10 minute wait, SDK `submitWithdrawal` was retried again and failed before producing a hash with the same endpoint error.
+  - CLI second check matched SDK behavior:
+    - `node packages/bridge-cli/dist/cli.js bridge --from zeko:testnet --to mina:testnet --amount 2 --json --verbose`.
+    - `operation_id=fd90cf4b-8482-406c-898f-e88f84088861`.
+    - `submitted_transactions=[]`.
+    - `final_transaction=null`.
+    - Same HTTP 200 GraphQL `provingResult` `Overflow`.
+  - Deposit side was also checked after an L1 top-up:
+    - Mina L1 top-up hash `5JuNz1yuPRU9kMAsMbnoK9xcH5bCxbhdefJz83qVvFYRufBG9jpt`, amount `2.5 MINA`, fee `0.1 MINA`, from key 0 nonce `50`.
+    - SDK `canFinalizeDeposit` before the top-up returned `available=false`, `reason="No finalizable deposit found"`.
+    - SDK `submitDeposit` failed before producing a hash with the same HTTP 200 GraphQL `provingResult` `Overflow`.
+    - After a 10 minute wait, SDK `submitDeposit` was retried and failed before producing a hash with the same endpoint error.
+  - No SDK source changes or CLI changes were made in response to this endpoint error because SDK and CLI behavior match.
+- Final sequencer-fix revalidation on 2026-06-10:
+  - SDK-example-first local deposit finalization succeeded for the validator wallet's existing 2 MINA deposit before the CLI second check:
+    - Submit hash: `5JtthdEUsGPN9mvbYn9VbHcm8EGvLppPM5HU9GtmkiMEW49zc3DW`.
+    - Final hash: `5JuUHMngqipejCKxVBBkR7L9j4ujiqQmThE3dzTQHQwaheDYUZE1`.
+    - CLI second check, `operation resume-all --from mina:testnet --to zeko:testnet`, returned `operations_found=0`, `operations_resolved=0`.
+  - Fresh local CLI 2 MINA deposit completed after the SDK checks without growing the queue:
+    - Operation id: `442166bb-9f66-410f-bd93-e2a95ec4a0ed`.
+    - Route: `mina:testnet->zeko:testnet`.
+    - Submit hash: `5JtXRLqEwnNis9E98sWnJ33d4a18FrFYiRi2YgfRM69QMTmgoRfE`.
+    - Target deposit index: `74643`.
+    - Final hash: `5JuL8qqWSZBzGr4b15CXwpWYvLGgWsLR2isDzMjagWFzmqFdU4f2`.
+    - Final explorer URL: `https://zekoscan.io/testnet/tx/5JuL8qqWSZBzGr4b15CXwpWYvLGgWsLR2isDzMjagWFzmqFdU4f2`.
+  - SDK-example-first local 2 MINA withdrawal completed before the CLI second check:
+    - SDK `submitWithdrawal` hash: `5Juaw1fWLAtrKXSaY867ULM1qWa7RVCsvWZimxrqY616LvAHMS7r`.
+    - Target withdrawal index: `10555`.
+    - Initial SDK `finalizeWithdrawal` readiness error, before the queue was ready: `Did not find any withdrawal to finalize`.
+    - Later SDK `finalizeWithdrawal` final hash: `5JuGscin3gqWD2WDpJHZ5cDHVM5GUotaCmnHhnawpfiMkikezi3d`.
+    - CLI second check, `operation resume-all --from zeko:testnet --to mina:testnet`, returned `operations_found=0`, `operations_resolved=0`.
+  - Deployed validator 2 MINA deposit completed through Worker, Workflow, Sandbox, CLI, and Slack:
+    - Worker version id: `9deff852-8bf7-4084-97b1-6440fbd99b1e`.
+    - Workflow instance: `bridge-validator-manual-mina-to-zeko-1781061813476`.
+    - Sandbox id: `bridge-validator-bridge-validator-manual-1-1qricne`.
+    - Operation id: `f993cdfc-54ea-42bc-83ec-67508599e284`.
+    - Route: `mina:testnet->zeko:testnet`.
+    - Submit hash: `5JuQMDYkzq7FCFSWpQGYVsEHDfxeiVy75LHi8SiDUVbVaa9qitKY`.
+    - Target deposit index: `74678`.
+    - Final hash: `5JuvWNLEFVqgGN1gukvineBQwXhyzpNB4Sn9ocSLEDqhMCsWjkBE`.
+    - Final explorer URL: `https://zekoscan.io/testnet/tx/5JuvWNLEFVqgGN1gukvineBQwXhyzpNB4Sn9ocSLEDqhMCsWjkBE`.
+    - Validator log path: `/workspace/state/zeko-bridge/logs/f993cdfc-54ea-42bc-83ec-67508599e284.jsonl`.
+    - Workflow success reporting step `report bridge validation success-1` succeeded.
+    - Workflow cleanup step `destroy bridge sandbox-1` succeeded.
+  - Deployed validator 2 MINA withdrawal completed through Worker, Workflow, Sandbox, CLI, and Slack:
+    - Worker version id: `9deff852-8bf7-4084-97b1-6440fbd99b1e`.
+    - Workflow instance: `bridge-validator-manual-zeko-to-mina-1781067008607`.
+    - Sandbox id: `bridge-validator-bridge-validator-manual-1-0mqwasy`.
+    - Operation id: `b702ac01-2d66-4b4e-97a6-cfa33f19f69b`.
+    - Route: `zeko:testnet->mina:testnet`.
+    - Submit hash: `5JvAD6CkYfVYhxsdz8pEbXVFcxjtgXXsTFdaaUhJLdZL4tweQ4yX`.
+    - Target withdrawal index: `10556`.
+    - Final hash: `5JvKfpZ7ncnNkWv6XEjKmdUL5wPG2s64zeAwG5buTakrvCHz77f4`.
+    - Final explorer URL: `https://minascan.io/devnet/tx/5JvKfpZ7ncnNkWv6XEjKmdUL5wPG2s64zeAwG5buTakrvCHz77f4`.
+    - Validator log path: `/workspace/state/zeko-bridge/logs/b702ac01-2d66-4b4e-97a6-cfa33f19f69b.jsonl`.
+    - Workflow command status step returned `status="completed"`, `exitCode=0`.
+    - Workflow validation output returned `submittedTransactionCount=2`, `queueAdvanceCount=0`, and `historyEventCount=72`.
+    - Workflow success reporting step `report bridge validation success-1` succeeded.
+    - Workflow cleanup step `destroy bridge sandbox-1` succeeded.
+  - Post-run SDK queue checks for the dedicated validator wallet:
+    - `canFinalizeDeposit`: `available=false`, `reason="No finalizable deposit found"`.
+    - `canFinalizeWithdrawal`: `available=false`, `reason="Withdrawal already finalised"`, `status="alreadyFinalised"`, `index=10556`.
+  - Post-run CLI queue-only checks for the dedicated validator wallet matched SDK behavior and did not submit fresh operations:
+    - `operation resume-all --from mina:testnet --to zeko:testnet`: `operations_found=0`, `operations_resolved=0`.
+    - `operation resume-all --from zeko:testnet --to mina:testnet`: `operations_found=0`, `operations_resolved=0`.
+  - No SDK source changes were retained. The temporary SDK example timeout edit and generated SDK example logs were removed.
+
+## Remaining Work
+
+- Done. The local SDK/CLI path and deployed validator path both completed 2 MINA deposit and withdrawal validation, with clean post-run SDK and CLI queue checks.

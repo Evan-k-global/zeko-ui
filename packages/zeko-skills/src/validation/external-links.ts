@@ -72,7 +72,7 @@ export const validateExternalLinks = async () => {
 			status = Number(checkExternalLink(url))
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error)
-			throw new Error(`External link check failed for ${url}: ${message}`)
+			throw new Error(`External link check failed for ${url} with error: ${message}`)
 		}
 
 		const isApiEndpoint = isGraphQlEndpoint(url) || url.endsWith("/claim")
@@ -80,7 +80,7 @@ export const validateExternalLinks = async () => {
 
 		assert(
 			acceptedStatuses.includes(status),
-			`External link check failed for ${url}: HTTP ${status}`
+			`External link check failed for ${url} with HTTP ${status}`
 		)
 	}
 }

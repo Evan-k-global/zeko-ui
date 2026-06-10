@@ -301,3 +301,4 @@
 - T301 | done | resolve-pr-198-conflicts | done/T301-resolve-pr-198-conflicts.md
 - T302 | done | rewrite-cloudflare-build-config-cli | done/T302-rewrite-cloudflare-build-config-cli.md
 - T303 | done | trigger-workers-builds-after-sync | done/T303-trigger-workers-builds-after-sync.md
+- T304 | done | fix-cloudflare-sync-workflow-ci-invocation | done/T304-fix-cloudflare-sync-workflow-ci-invocation.md

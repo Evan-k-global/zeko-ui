@@ -308,3 +308,17 @@
 - T308 | done | configure-bridge-cli-zeko-mainnet-network | done/T308-configure-bridge-cli-zeko-mainnet-network.md
 - T309 | done | address-bridge-cli-doctor-network-id-review | done/T309-address-bridge-cli-doctor-network-id-review.md
 - T310 | done | harden-bridge-cli-doctor-network-id-formatting | done/T310-harden-bridge-cli-doctor-network-id-formatting.md
+- T311 | done | update-network-nomenclature | done/T311-update-network-nomenclature.md
+- T312 | done | centralize-network-nomenclature | done/T312-centralize-network-nomenclature.md
+- T313 | done | move-ui-network-boundary-to-package | done/T313-move-ui-network-boundary-to-package.md
+- T314 | done | own-wallet-sdk-and-auro-mainnet | done/T314-own-wallet-sdk-and-auro-mainnet.md
+- T315 | done | internal-sdk-cleanup-and-review | done/T315-internal-sdk-cleanup-and-review.md
+- T316 | done | source-monorepo-bridge-cli-sync | done/T316-source-monorepo-bridge-cli-sync.md
+- T317 | done | fix-codex-review-deploy-gaps | done/T317-fix-codex-review-deploy-gaps.md
+- T318 | done | update-bridge-metrics-network-prefixes | done/T318-update-bridge-metrics-network-prefixes.md
+- T319 | done | fix-faucet-review-network-gaps | done/T319-fix-faucet-review-network-gaps.md
+- T320 | done | make-sync-tooling-monorepo-first | done/T320-make-sync-tooling-monorepo-first.md
+- T321 | done | remove-faucet-legacy-network-compat | done/T321-remove-faucet-legacy-network-compat.md
+- T322 | done | use-tsgo-for-typecheck-tasks | done/T322-use-tsgo-for-typecheck-tasks.md
+- T323 | done | remove-claim-service-legacy-network-compat | done/T323-remove-claim-service-legacy-network-compat.md
+- T324 | done | resolve-network-nomenclature-conflicts | done/T324-resolve-network-nomenclature-conflicts.md

@@ -1,0 +1,49 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "actions-dashboard",
+	"main": "./.output/server/index.mjs",
+	"compatibility_date": "2025-10-21",
+	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+	"workers_dev": false,
+	"preview_urls": false,
+	"assets": {
+		"binding": "ASSETS",
+		"directory": "./.output/public/"
+	},
+	"observability": {
+		"traces": {
+			"enabled": true,
+			"destinations": ["zeko-traces"],
+			"head_sampling_rate": 1,
+			"persist": true
+		},
+		"logs": {
+			"enabled": true,
+			"destinations": ["zeko-logs"],
+			"head_sampling_rate": 1,
+			"persist": true
+		}
+	},
+	"routes": [
+		{
+			"pattern": "actions.dashboard.zeko.io",
+			"custom_domain": true
+		}
+	],
+	"vars": {
+		"MAINNET_ACTIONS_INDEXER_URL": "https://indexer.actions.zeko.io",
+		"MAINNET_L1_ARCHIVE_URL": "https://gateway.mina.archive.mainnet.zeko.io",
+		"MAINNET_L2_ARCHIVE_URL": "https://archive.mainnet.zeko.io/graphql",
+		"MAINNET_L1_DAEMON_URL": "https://gateway.mina.mainnet.zeko.io",
+		"MAINNET_L2_DAEMON_URL": "https://mainnet.zeko.io/graphql",
+		"MAINNET_OUTER_ACTIONS_PUBLIC_KEY": "B62qm46jqHb9HAYiyGJeYkWgqNtPQEiTcssuoiua8VvKJGDStFsRcyC",
+		"MAINNET_INNER_ACTIONS_PUBLIC_KEY": "B62qjDedeP9617oTUeN8JGhdiqWg4t64NtQkHaoZB9wyvgSjAyupPU1",
+		"TESTNET_ACTIONS_INDEXER_URL": "https://testnet.indexer.actions.zeko.io",
+		"TESTNET_L1_ARCHIVE_URL": "https://gateway.mina.archive.devnet.zeko.io",
+		"TESTNET_L2_ARCHIVE_URL": "https://archive.testnet.zeko.io/graphql",
+		"TESTNET_L1_DAEMON_URL": "https://gateway.mina.devnet.zeko.io",
+		"TESTNET_L2_DAEMON_URL": "https://testnet.zeko.io/graphql",
+		"TESTNET_OUTER_ACTIONS_PUBLIC_KEY": "B62qkekmS9273D1EsFfMSJMMDAmgvh1WyoYE2vs1r7k4GtGBqVYABn2",
+		"TESTNET_INNER_ACTIONS_PUBLIC_KEY": "B62qjDedeP9617oTUeN8JGhdiqWg4t64NtQkHaoZB9wyvgSjAyupPU1"
+	}
+}

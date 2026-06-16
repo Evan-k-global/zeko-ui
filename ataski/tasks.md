@@ -323,3 +323,13 @@
 - T323 | done | remove-claim-service-legacy-network-compat | done/T323-remove-claim-service-legacy-network-compat.md
 - T324 | done | resolve-network-nomenclature-conflicts | done/T324-resolve-network-nomenclature-conflicts.md
 - T325 | done | pin-faucet-container-toolchain | done/T325-pin-faucet-container-toolchain.md
+- T326 | done | actions-dashboard | done/T326-actions-dashboard.md
+- T341 | done | rename-actions-dashboard-and-clean-board | done/T341-rename-actions-dashboard-and-clean-board.md
+- T342 | done | cloudflare-access-provider | done/T342-cloudflare-access-provider.md
+- T343 | done | indexer-health-probe-redirects | done/T343-indexer-health-probe-redirects.md
+- T344 | done | investigate-dashboard-indexer-routing | done/T344-investigate-dashboard-indexer-routing.md
+- T345 | done | actions-indexer-canonical-chain-filter | done/T345-actions-indexer-canonical-chain-filter.md
+- T346 | done | bridge-sdk-canonical-chain-filter | done/T346-bridge-sdk-canonical-chain-filter.md
+- T347 | done | fix-actions-dashboard-same-zone-fetch | done/T347-fix-actions-dashboard-same-zone-fetch.md
+- T348 | done | filter-orphaned-dashboard-coverage | done/T348-filter-orphaned-dashboard-coverage.md
+- T349 | done | preserve-local-control-origin | done/T349-preserve-local-control-origin.md

@@ -71,6 +71,16 @@ const buildWithdrawalAction = ({
 	amount: UInt64.from(5)
 })
 
+const buildWitnessForWithdrawalAction = (withdrawal: Action & Withdrawal): InnerWitness => ({
+	action: withdrawal.action,
+	beforeActionState: Field(withdrawal.index + 901),
+	afterActionState: Field(withdrawal.index + 902),
+	index: withdrawal.index,
+	timestamp: `${Number(withdrawal.timestamp) + 1000}`,
+	hash: withdrawal.hash,
+	aux: utils.withdrawalAux(withdrawal)
+})
+
 const lastCommit: OuterCommit = {
 	action: [Field(1), Field(2)],
 	afterActionState: Field(3),
@@ -134,7 +144,7 @@ describe("withdrawal state", () => {
 			afterActionState: Field(402),
 			index: 0,
 			timestamp: "0",
-			hash: "withdrawal-witness",
+			hash: withdrawal.hash,
 			aux: utils.withdrawalAux(withdrawal)
 		}
 
@@ -155,7 +165,7 @@ describe("withdrawal state", () => {
 		expect(result.withdrawals[0]?.finalised).toBe(false)
 	})
 
-	it("marks unwitnessed withdrawals finalised when the helper account has advanced past them", async () => {
+	it("does not mark unwitnessed withdrawals finalised from wallet-local indexes", async () => {
 		const bridge = buildBridge()
 		const bridgeInternals = bridge as unknown as {
 			fetchUserWithdrawalActions: (pk: PublicKey) => Promise<Array<Action & Withdrawal>>
@@ -180,8 +190,8 @@ describe("withdrawal state", () => {
 
 		expect(result.withdrawals).toHaveLength(1)
 		expect(result.withdrawals[0]?.index).toBe(0)
-		expect(result.withdrawals[0]?.committed).toBe(true)
-		expect(result.withdrawals[0]?.finalised).toBe(true)
+		expect(result.withdrawals[0]?.committed).toBe(false)
+		expect(result.withdrawals[0]?.finalised).toBe(false)
 		expect(result.committedIndex).toBe(-1)
 		expect(result.finalisedIndex).toBe(0)
 	})
@@ -210,5 +220,44 @@ describe("withdrawal state", () => {
 
 		expect(result.withdrawals.map((withdrawal) => withdrawal.index)).toEqual([0, 1])
 		expect(result.withdrawals.map((withdrawal) => withdrawal.bridgeVersion)).toEqual([1, 2])
+	})
+
+	it("does not collapse repeated same-aux withdrawals onto an older witness", async () => {
+		const bridge = buildBridge()
+		const oldWithdrawal = buildWithdrawalAction({ index: 0, timestamp: "1700000000000" })
+		const newWithdrawal = buildWithdrawalAction({ index: 1, timestamp: "1700000001000" })
+		const oldWitness = buildWitnessForWithdrawalAction(oldWithdrawal)
+		const bridgeInternals = bridge as unknown as {
+			fetchUserWithdrawalActions: (pk: PublicKey) => Promise<Array<Action & Withdrawal>>
+			fetchAccount: (...args: unknown[]) => Promise<{ zkappState: string[] | null } | null>
+			fetchCurrentSlot: () => Promise<UInt32>
+		}
+
+		vi.spyOn(bridgeInternals, "fetchUserWithdrawalActions").mockResolvedValue([
+			oldWithdrawal,
+			newWithdrawal
+		])
+		vi.spyOn(bridgeInternals, "fetchAccount").mockResolvedValue({
+			zkappState: ["0", "1"]
+		})
+		vi.spyOn(bridgeInternals, "fetchCurrentSlot").mockResolvedValue(UInt32.from(100))
+		vi.spyOn(utils, "fetchInnerWitnessesFromAuxes").mockResolvedValue([oldWitness])
+		vi.spyOn(utils, "fetchCommitAsePastSlot").mockResolvedValue({
+			commit: {
+				...lastCommit,
+				innerActionStateLength: UInt32.from(1)
+			},
+			ase: []
+		})
+
+		const result = await bridge.fetchWithdrawalsWithStates(recipient)
+
+		expect(result.withdrawals.map((withdrawal) => withdrawal.hash)).toEqual([
+			oldWithdrawal.hash,
+			newWithdrawal.hash
+		])
+		expect(result.withdrawals.map((withdrawal) => withdrawal.finalised)).toEqual([true, false])
+		expect(result.withdrawals.map((withdrawal) => withdrawal.committed)).toEqual([true, false])
+		expect(result.finalisedIndex).toBe(0)
 	})
 })

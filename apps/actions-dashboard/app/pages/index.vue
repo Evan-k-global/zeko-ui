@@ -11,19 +11,21 @@ import {
 } from "lucide-vue-next"
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import {
+	actionFinalityDetail,
+	actionFinalityLabel,
+	actionFinalityState,
 	buildChainInsight,
 	databaseAgeSeconds,
 	finalityState,
 	gapLabel,
 	gapState,
-	tailState,
 	type ChainInsight
 } from "~/utils/ops-insights"
 import { indexerControlCopy } from "~/utils/indexer-control-copy"
 import { postControlRefreshOptions } from "~/utils/refresh-options"
 
 type ServiceStatus = "ok" | "warn" | "error" | "unknown"
-type ServiceKind = "actions-indexer" | "archive" | "daemon"
+type ServiceKind = "actions-indexer" | "actions-api" | "archive" | "daemon"
 type OpsNetwork = "mainnet" | "testnet"
 
 interface ServiceProbe {
@@ -44,6 +46,7 @@ interface OpsSnapshot {
 	config: {
 		network: OpsNetwork
 		actionsIndexerUrl: string
+		actionsApiUrl: string
 		l1ArchiveUrl: string
 		l2ArchiveUrl: string
 		l1DaemonUrl: string
@@ -83,6 +86,7 @@ let refreshSequence = 0
 
 const serviceIcon = (service: ServiceProbe) => {
 	if (service.kind === "actions-indexer") return Activity
+	if (service.kind === "actions-api") return Zap
 	if (service.kind === "archive") return Database
 	return Server
 }
@@ -112,6 +116,7 @@ const serviceById = computed(
 	() => new Map(services.value.map((service) => [service.id, service]))
 )
 const indexerService = computed(() => serviceById.value.get("actions-indexer"))
+const actionsApiService = computed(() => serviceById.value.get("actions-api"))
 const chainRows = computed<ChainRow[]>(() => {
 	const indexer = indexerService.value
 	const l1Archive = serviceById.value.get("l1-archive")
@@ -177,20 +182,18 @@ const formatValue = (value: string | number | boolean | null) => {
 
 const formatBlock = (value: number | null) =>
 	value === null ? "-" : value.toLocaleString()
-const pendingActionLabel = (row: ChainRow) => {
-	if (row.nonCanonicalTailCount === null) return "pending actions unknown"
-	if (row.nonCanonicalTailCount === 0) return "no pending actions"
-	const unit = row.nonCanonicalTailCount === 1 ? "action" : "actions"
-	return `${row.nonCanonicalTailCount.toLocaleString()} ${unit} waiting finality`
-}
 const finalityGapLabel = (row: ChainRow) => {
-	if (row.id === "l2") return "72h action finality"
+	if (row.id === "l2") {
+		if (row.archiveFinalityGap === null) return "finality unknown"
+		if (row.archiveFinalityGap === 0) return "archive canonical head current"
+		return `${row.archiveFinalityGap.toLocaleString()} blocks not canonical`
+	}
 	if (row.archiveFinalityGap === null) return "finality unknown"
 	return `${row.archiveFinalityGap.toLocaleString()} blocks not final`
 }
 const finalityDetail = (row: ChainRow) => {
 	if (row.id === "l1") return "L1 finality target: 290 blocks"
-	return "L2 actions finalize after 72 hours"
+	return "L2 action finality follows archive canonical status"
 }
 const coverageState = (row: ChainRow): ServiceStatus => {
 	if (row.lastActionBlockHeight === null && row.archiveHeight !== null)
@@ -235,7 +238,7 @@ const dashboardCheckStates = computed<ServiceStatus[]>(() => {
 		...services.value.map((service) => service.status),
 		...chainRows.value.flatMap((row) => [
 			coverageState(row),
-			tailState(row.nonCanonicalTailCount, row.expectedFinalityBlocks),
+			actionFinalityState(row),
 			row.daemonBlockHeightSupported ? gapState(row.archiveDaemonGap) : "ok"
 		])
 	]
@@ -596,12 +599,10 @@ watch(
         v-for="row in chainRows"
         :key="`${row.id}-pending-actions`"
         class="InsightCard"
-        :data-state="tailState(row.nonCanonicalTailCount, row.expectedFinalityBlocks)">
+        :data-state="actionFinalityState(row)">
         <span>{{ row.indexerLabel }} actions in DB awaiting finality</span>
-        <strong>{{ pendingActionLabel(row) }}</strong>
-        <small>final action block {{
-            formatBlock(row.finalActionBlockHeight)
-          }}</small>
+        <strong>{{ actionFinalityLabel(row) }}</strong>
+        <small>{{ actionFinalityDetail(row) }}</small>
       </article>
       <article
         v-for="row in chainRows"
@@ -667,6 +668,53 @@ watch(
 
         <p v-if="indexerService.error" class="ServiceError">
           {{ indexerService.error }}
+        </p>
+      </article>
+
+      <article
+        v-if="actionsApiService"
+        class="ServiceCard IndexerCard"
+        :data-state="actionsApiService.status">
+        <header class="ServiceHeader">
+          <component :is="serviceIcon(actionsApiService)" :size="19" />
+          <div>
+            <h2>{{ actionsApiService.label }}</h2>
+            <p>{{ actionsApiService.endpoint }}</p>
+          </div>
+          <span class="StateBadge" :data-state="actionsApiService.status">{{
+            actionsApiService.status
+          }}</span>
+        </header>
+
+        <dl class="DetailGrid Compact">
+          <div>
+            <dt>HTTP</dt>
+            <dd>{{ actionsApiService.httpStatus ?? "-" }}</dd>
+          </div>
+          <div>
+            <dt>Latency</dt>
+            <dd>
+              {{
+                actionsApiService.latencyMs === null
+                ? "-"
+                : `${actionsApiService.latencyMs} ms`
+              }}
+            </dd>
+          </div>
+          <div>
+            <dt>Checked</dt>
+            <dd>{{ formatDate(actionsApiService.checkedAt) }}</dd>
+          </div>
+          <div
+            v-for="entry in detailEntries(actionsApiService)"
+            :key="entry.key">
+            <dt>{{ entry.label }}</dt>
+            <dd>{{ formatValue(entry.value) }}</dd>
+          </div>
+        </dl>
+
+        <p v-if="actionsApiService.error" class="ServiceError">
+          {{ actionsApiService.error }}
         </p>
       </article>
     </section>

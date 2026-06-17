@@ -1,4 +1,4 @@
-import { and, between, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm"
+import { and, between, desc, eq, gte, inArray, isNull, lt, not, sql } from "drizzle-orm"
 import { commitActions, outerActions, witnessActions } from "../../drizzle/schema"
 import { builder } from "../builder"
 import type { Database } from "../db"
@@ -41,11 +41,19 @@ export async function queryOuterWitnessesFromAuxes(
 	db: DatabaseInstance,
 	auxes: string[]
 ): Promise<Witness[]> {
+	if (auxes.length === 0) return []
+
 	const witnesses = await db.drizzle
 		.select()
 		.from(witnessActions)
 		.innerJoin(outerActions, eq(witnessActions.afterState, outerActions.afterState))
-		.where(and(eq(outerActions.kind, "witness"), inArray(witnessActions.aux, auxes)))
+		.where(
+			and(
+				eq(outerActions.kind, "witness"),
+				inArray(witnessActions.aux, auxes),
+				not(isNull(outerActions.markedAsCanonicalAt))
+			)
+		)
 
 	return witnesses.map(({ witness_actions, outer_actions }) => ({
 		...outer_actions,
@@ -139,7 +147,13 @@ export async function queryCommitAsePastSlot(
 			.select({ anchorIndex: outerActions.index })
 			.from(outerActions)
 			.innerJoin(commitActions, eq(outerActions.afterState, commitActions.afterState))
-			.where(and(eq(outerActions.kind, "commit"), lt(outerActions.slotRangeUpper, BigInt(slot))))
+			.where(
+				and(
+					eq(outerActions.kind, "commit"),
+					lt(outerActions.slotRangeUpper, BigInt(slot)),
+					not(isNull(outerActions.markedAsCanonicalAt))
+				)
+			)
 			.orderBy(desc(outerActions.index))
 			.limit(1)
 	)
@@ -219,7 +233,16 @@ const OuterActionInterface = builder.interfaceRef<OuterBaseAction>("OuterAction"
 		timestamp: t.exposeString("timestamp"),
 		txnHash: t.exposeString("txnHash"),
 		fields: t.exposeStringList("fields"),
-		kind: t.field({ type: OuterActionKind, resolve: (r) => r.kind })
+		kind: t.field({ type: OuterActionKind, resolve: (r) => r.kind }),
+		markedAsCanonicalAt: t.field({
+			type: "String",
+			nullable: true,
+			resolve: (r) => r.markedAsCanonicalAt?.toISOString() ?? null
+		}),
+		finalityStatus: t.field({
+			type: "String",
+			resolve: (r) => (r.markedAsCanonicalAt === null ? "pending_finality" : "final")
+		})
 	})
 })
 

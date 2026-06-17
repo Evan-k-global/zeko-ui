@@ -4,6 +4,9 @@ import { indexerControlCopy } from "../app/utils/indexer-control-copy"
 import { postControlRefreshOptions } from "../app/utils/refresh-options"
 import {
 	actionGapState,
+	actionFinalityDetail,
+	actionFinalityLabel,
+	actionFinalityState,
 	blockGap,
 	buildChainInsight,
 	databaseAgeSeconds,
@@ -22,6 +25,7 @@ import {
 	normalizeEndpoint,
 	probeDaemon,
 	probeActionsIndexer,
+	probeActionsApi,
 	readActionsIndexerToken,
 	resolveControlRequestOrigin,
 	resolveControlNetwork,
@@ -451,6 +455,126 @@ describe("actions dashboard utilities", () => {
 				httpStatus: 200,
 				details: { statusHttp: 401 },
 				error: 'Status check returned HTTP 401: {"message":"invalid token"}'
+			})
+		} finally {
+			globalThis.fetch = originalFetch
+		}
+	})
+
+	it("warns when the deployed actions API schema does not expose finality metadata", async () => {
+		const originalFetch = globalThis.fetch
+		globalThis.fetch = (async () =>
+			Response.json({
+				data: {
+					outerAction: {
+						fields: [{ name: "afterState" }, { name: "beforeState" }, { name: "index" }]
+					},
+					innerAction: {
+						fields: [{ name: "afterState" }, { name: "beforeState" }, { name: "index" }]
+					}
+				}
+			})) as typeof fetch
+
+		try {
+			await expect(
+				probeActionsApi({
+					endpoint: "https://testnet.api.actions.zeko.io/graphql"
+				})
+			).resolves.toMatchObject({
+				id: "actions-api",
+				status: "warn",
+				details: {
+					outerActionFinalityMetadata: false,
+					innerActionFinalityMetadata: false
+				},
+				error: "Actions API schema is missing finality metadata"
+			})
+		} finally {
+			globalThis.fetch = originalFetch
+		}
+	})
+
+	it("includes actions API compatibility warnings in the dashboard snapshot", async () => {
+		const originalFetch = globalThis.fetch
+		globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input)
+			const body = JSON.parse(String(init?.body ?? "{}")) as { query?: string }
+
+			if (url.endsWith("/health")) {
+				return Response.json({
+					status: "healthy",
+					service: { environment: "testnet" },
+					database: { status: "up" },
+					indexer: {
+						status: "running",
+						lastFetchedBlock: { outer: 10, inner: 20 },
+						consecutiveErrors: 0,
+						canonicalProgress: {}
+					}
+				})
+			}
+
+			if (url.endsWith("/status")) return Response.json({ isRunning: true })
+
+			if (body.query?.includes("OpsActionsApiSchema")) {
+				return Response.json({
+					data: {
+						outerAction: { fields: [{ name: "index" }] },
+						innerAction: { fields: [{ name: "index" }] }
+					}
+				})
+			}
+
+			if (body.query?.includes("OpsActionCoverage")) {
+				return Response.json({ data: { actions: [] } })
+			}
+
+			if (body.query?.includes("OpsArchiveState")) {
+				return Response.json({
+					data: {
+						networkState: {
+							maxBlockHeight: {
+								canonicalMaxBlockHeight: 20,
+								pendingMaxBlockHeight: 20
+							}
+						}
+					}
+				})
+			}
+
+			return Response.json({
+				data: {
+					syncStatus: "SYNCED",
+					daemonStatus: { syncStatus: "SYNCED" },
+					bestChain: [
+						{
+							stateHash: "state",
+							protocolState: {
+								consensusState: {
+									blockHeight: 20,
+									slotSinceGenesis: 30
+								}
+							}
+						}
+					]
+				}
+			})
+		}) as typeof fetch
+
+		try {
+			await expect(
+				createOpsSnapshot("testnet", {
+					TESTNET_ACTIONS_INDEXER_TOKEN: "testnet-token"
+				})
+			).resolves.toMatchObject({
+				summary: { warn: 1 },
+				services: expect.arrayContaining([
+					expect.objectContaining({
+						id: "actions-api",
+						status: "warn",
+						error: "Actions API schema is missing finality metadata"
+					})
+				])
 			})
 		} finally {
 			globalThis.fetch = originalFetch
@@ -902,6 +1026,118 @@ describe("actions dashboard utilities", () => {
 		expect(actionGapState(1_000)).toBe("warn")
 		expect(actionGapState(0)).toBe("ok")
 		expect(tailState(280, 290)).toBe("ok")
+	})
+
+	it("reports L2 canonical action finality stalls as dashboard errors", () => {
+		const stalledL2 = buildChainInsight({
+			id: "l2",
+			label: "L2 Zeko",
+			indexerLabel: "Inner",
+			indexer: {
+				id: "actions-indexer",
+				details: {
+					lastFetchedInner: 1_097_358,
+					innerLastFinalBlockHeight: 1_097_016,
+					innerNonCanonicalTailCount: 17
+				}
+			},
+			archive: {
+				id: "l2-archive",
+				details: {
+					canonicalMaxBlockHeight: 1_097_396,
+					pendingMaxBlockHeight: 1_097_396
+				}
+			},
+			daemon: {
+				id: "l2-daemon",
+				details: {}
+			},
+			indexerHeightKey: "lastFetchedInner",
+			indexerFinalHeightKey: "innerLastFinalBlockHeight",
+			nonCanonicalTailKey: "innerNonCanonicalTailCount",
+			expectedFinalityBlocks: null,
+			daemonBlockHeightSupported: false
+		})
+
+		expect(actionFinalityState(stalledL2)).toBe("error")
+		expect(actionFinalityLabel(stalledL2)).toBe("17 canonical actions not finalized in DB")
+		expect(actionFinalityDetail(stalledL2)).toContain("archive canonical 1,097,396")
+		expect(actionFinalityDetail(stalledL2)).toContain("DB final 1,097,016")
+		expect(actionFinalityDetail(stalledL2)).toContain("indexed 1,097,358")
+	})
+
+	it("reports L1 non-final action tails as deposit finality warnings", () => {
+		const blockedL1 = buildChainInsight({
+			id: "l1",
+			label: "L1 Mina",
+			indexerLabel: "Outer",
+			indexer: {
+				id: "actions-indexer",
+				details: {
+					lastFetchedOuter: 528_625,
+					outerLastFinalBlockHeight: 528_346,
+					outerNonCanonicalTailCount: 29,
+					l1ActionCoverageStatus: "current"
+				}
+			},
+			archive: {
+				id: "l1-archive",
+				details: {
+					canonicalMaxBlockHeight: 528_625,
+					pendingMaxBlockHeight: 528_637
+				}
+			},
+			daemon: {
+				id: "l1-daemon",
+				details: { blockHeight: 528_637 }
+			},
+			indexerHeightKey: "lastFetchedOuter",
+			indexerFinalHeightKey: "outerLastFinalBlockHeight",
+			nonCanonicalTailKey: "outerNonCanonicalTailCount",
+			expectedFinalityBlocks: 290,
+			daemonBlockHeightSupported: true
+		})
+
+		expect(actionFinalityState(blockedL1)).toBe("warn")
+		expect(actionFinalityLabel(blockedL1)).toBe("29 L1 actions not final; deposits may be blocked")
+		expect(actionFinalityDetail(blockedL1)).toContain("DB final 528,346")
+		expect(actionFinalityDetail(blockedL1)).toContain("indexed 528,625")
+	})
+
+	it("reports L2 action finality stalls before any DB action is finalized", () => {
+		const stalledL2 = buildChainInsight({
+			id: "l2",
+			label: "L2 Zeko",
+			indexerLabel: "Inner",
+			indexer: {
+				id: "actions-indexer",
+				details: {
+					lastFetchedInner: 1_097_358,
+					innerLastFinalBlockHeight: null,
+					innerNonCanonicalTailCount: 17
+				}
+			},
+			archive: {
+				id: "l2-archive",
+				details: {
+					canonicalMaxBlockHeight: 1_097_396,
+					pendingMaxBlockHeight: 1_097_396
+				}
+			},
+			daemon: {
+				id: "l2-daemon",
+				details: {}
+			},
+			indexerHeightKey: "lastFetchedInner",
+			indexerFinalHeightKey: "innerLastFinalBlockHeight",
+			nonCanonicalTailKey: "innerNonCanonicalTailCount",
+			expectedFinalityBlocks: null,
+			daemonBlockHeightSupported: false
+		})
+
+		expect(actionFinalityState(stalledL2)).toBe("error")
+		expect(actionFinalityLabel(stalledL2)).toBe("17 canonical actions not finalized in DB")
+		expect(actionFinalityDetail(stalledL2)).toContain("DB final -")
 	})
 
 	it("builds L1 chain insights from action-indexer, archive, and daemon probes", () => {

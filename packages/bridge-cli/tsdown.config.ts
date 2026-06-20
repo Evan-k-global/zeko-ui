@@ -1,7 +1,9 @@
 import { defineConfig } from "tsdown"
 
 export default defineConfig({
-	entry: ["./src/cli.ts"],
+	entry: {
+		cli: "./src/cli.ts"
+	},
 	platform: "node",
 	dts: false,
 	outputOptions: {

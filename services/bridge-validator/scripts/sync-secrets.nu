@@ -1,5 +1,6 @@
 use ./env.nu [
 	default-env-file
+	default-wallet-env-file
 	default-wrangler-config
 	read-dotenv
 	require-value
@@ -14,6 +15,36 @@ def put-optional-secret [values: record, key: string, wrangler_config: path] {
 	if $value != "" {
 		put-secret $key $value $wrangler_config
 	}
+}
+
+def read-optional-dotenv [env_file: path] {
+	if ($env_file | path exists) {
+		return (read-dotenv $env_file)
+	}
+
+	{}
+}
+
+def read-explicit-wallet-dotenv [env_file: path] {
+	if not ($env_file | path exists) {
+		error make { msg: $"Explicit wallet env file does not exist: ($env_file)" }
+	}
+
+	read-dotenv $env_file
+}
+
+def resolve-dotenv-wallet-env-file [env_file: path, wallet_env_override: string] {
+	let env_dir = ($env_file | path expand | path dirname)
+	$env_dir | path join $wallet_env_override | path expand
+}
+
+def require-wallet-file-value [wallet_values: record, key: string, wallet_env_file: path] {
+	let value = ($wallet_values | get --optional $key | default "" | str trim)
+	if $value == "" {
+		error make { msg: $"Missing required wallet value in ($wallet_env_file): ($key)" }
+	}
+
+	$value
 }
 
 def resolve-wallet-private-key [values: record] {
@@ -49,7 +80,7 @@ def resolve-wallet-private-key [values: record] {
 		return $numbered_bridge_private_key
 	}
 
-	error make { msg: "Missing required value in .env: BRIDGE_VALIDATOR_WALLET_PRIVATE_KEY, WALLET_PRIVATE_KEY, ZEKO_BRIDGE_MINA_PRIVATE_KEY, ZEKO_BRIDGE_MINA_PRIVATE_KEY_0, or ZEKO_BRIDGE_MINA_PRIVATE_KEY_1" }
+	error make { msg: "Missing required wallet value: MINA_PRIVATE_KEY in .env.wallet.validator, or a legacy wallet key in .env" }
 }
 
 def resolve-wallet-public-key [values: record] {
@@ -64,7 +95,21 @@ def resolve-wallet-public-key [values: record] {
 		return $wallet_public_key
 	}
 
-	error make { msg: "Missing required value in .env: BRIDGE_VALIDATOR_WALLET_PUBLIC_KEY or WALLET_PUBLIC_KEY" }
+	error make { msg: "Missing required wallet value: PUBLIC_KEY in .env.wallet.validator, or a legacy public wallet key in .env" }
+}
+
+def resolve-wallet-keypair [wallet_values: record, values: record, wallet_env_file: path, use_wallet_file: bool] {
+	if $use_wallet_file {
+		return {
+			private_key: (require-wallet-file-value $wallet_values "MINA_PRIVATE_KEY" $wallet_env_file)
+			public_key: (require-wallet-file-value $wallet_values "PUBLIC_KEY" $wallet_env_file)
+		}
+	}
+
+	{
+		private_key: (resolve-wallet-private-key $values)
+		public_key: (resolve-wallet-public-key $values)
+	}
 }
 
 export def main [
@@ -74,8 +119,15 @@ export def main [
 	let env_file = ($env_file | default (default-env-file))
 	let wrangler_config = ($wrangler_config | default (default-wrangler-config))
 	let values = read-dotenv $env_file
-	let wallet_private_key = resolve-wallet-private-key $values
-	let wallet_public_key = resolve-wallet-public-key $values
+	let wallet_env_override = ($values | get --optional "BRIDGE_VALIDATOR_WALLET_ENV_FILE" | default "" | str trim)
+	let shell_wallet_env_override = ($env.BRIDGE_VALIDATOR_WALLET_ENV_FILE? | default "" | str trim)
+	let has_explicit_wallet_env_file = $wallet_env_override != "" or $shell_wallet_env_override != ""
+	let wallet_env_file = if $wallet_env_override != "" { resolve-dotenv-wallet-env-file $env_file $wallet_env_override } else { default-wallet-env-file }
+	let use_wallet_file = $has_explicit_wallet_env_file or ($wallet_env_file | path exists)
+	let wallet_values = if $use_wallet_file { read-explicit-wallet-dotenv $wallet_env_file } else { read-optional-dotenv $wallet_env_file }
+	let wallet_keypair = resolve-wallet-keypair $wallet_values $values $wallet_env_file $use_wallet_file
+	let wallet_private_key = $wallet_keypair.private_key
+	let wallet_public_key = $wallet_keypair.public_key
 
 	put-secret "WALLET_PRIVATE_KEY" $wallet_private_key $wrangler_config
 	put-secret "WALLET_PUBLIC_KEY" $wallet_public_key $wrangler_config
@@ -86,5 +138,5 @@ export def main [
 	put-optional-secret $values "BRIDGE_VALIDATOR_SOURCE_REF" $wrangler_config
 	put-optional-secret $values "GITHUB_TOKEN" $wrangler_config
 
-	print $"Cloudflare validator secrets synced from ($env_file)"
+	print $"Cloudflare validator secrets synced from ($env_file) and ($wallet_env_file)"
 }

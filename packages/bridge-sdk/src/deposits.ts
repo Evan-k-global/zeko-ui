@@ -285,6 +285,7 @@ export async function submitDeposit(
 	signTxn: SignTransaction
 ): Promise<string> {
 	setL1(runtime)
+	const fetchBridgeAccount = runtime.bridge?.fetchAccount ?? fetchAccount
 
 	await ensureBridgeTransferAmountCanCoverFees({
 		direction: "deposit",
@@ -292,10 +293,14 @@ export async function submitDeposit(
 		recipient,
 		accountCreationFee: runtime.l2AccountCreationFee,
 		bridgeProofFee: runtime.bridgeProofFee,
-		recipientAccountExists: async () => (await fetchAccount(runtime.l2Client, recipient)) !== null,
+		recipientAccountExists: async () =>
+			(await fetchBridgeAccount(runtime.l2Client, recipient)) !== null,
 		helperAccountExists: async () =>
-			(await fetchAccount(runtime.l2Client, recipient, TokenId.derive(runtime.innerHolder))) !==
-			null
+			(await fetchBridgeAccount(
+				runtime.l2Client,
+				recipient,
+				TokenId.derive(runtime.innerHolder)
+			)) !== null
 	})
 
 	await refreshCache(recipient)
@@ -477,7 +482,7 @@ export function getDepositFinalizationWaitReason(
 		return `Deposit ${witness.index} is accepted but not confirmed yet; confirmedIndex ${confirmedIndex} is behind deposit index ${witness.index}`
 	}
 
-	return "Deposit is not finalizable yet; an earlier deposit must be resolved first"
+	return `Deposit ${witness.index} is not finalizable yet; no synchronized bridge commit currently confirms this deposit`
 }
 
 export async function finalizeDeposit(

@@ -33,6 +33,11 @@ import {
 	readOptionalStringArg,
 	readRequiredStringArg
 } from "../core/command-args"
+import {
+	bridgeEndpointOverrideArgs,
+	readBridgeEndpointOverrides,
+	type BridgeEndpointOverrides
+} from "../core/endpoint-overrides"
 import { createOperationLogger } from "../core/logger"
 import { isRecoverableMutationError } from "../core/mutation-errors"
 import { resolveAppPaths } from "../core/paths"
@@ -48,6 +53,7 @@ import {
 import { resolveDepositTimeoutSlots } from "../core/timeouts"
 import type {
 	BridgeCapabilityDiagnostic,
+	BridgeCommitSnapshot,
 	BridgeSdkOperation,
 	OperationPhase,
 	OperationSession
@@ -74,6 +80,7 @@ type BridgeFlowDeps = {
 			| "canCancelDeposit"
 			| "canFinalizeWithdrawal"
 			| "getStatusSources"
+			| "getBridgeCommitSnapshot"
 		>
 	>
 	sessionStore: Pick<SessionStore, "save">
@@ -122,6 +129,9 @@ type BridgeCommandArgs = {
 	timeoutSlots: { type: "string"; required: false; alias: string[] }
 	pollIntervalMs: { type: "string"; required: false; alias: string[] }
 	retryDelayMs: { type: "string"; required: false; alias: string[] }
+	actionsApi: { type: "string"; required: false; alias: string[] }
+	l1Url: { type: "string"; required: false; alias: string[] }
+	l1ArchiveUrl: { type: "string"; required: false; alias: string[] }
 	json: { type: "boolean"; default: false }
 	verbose: { type: "boolean"; default: false }
 }
@@ -244,6 +254,7 @@ const parseBridgeCommandArgs = (args: Record<string, unknown>) => ({
 		"--poll-interval-ms"
 	),
 	retryDelayMs: readAliasedNumberArg(args, "retryDelayMs", "retry-delay-ms", "--retry-delay-ms"),
+	endpointOverrides: readBridgeEndpointOverrides(args),
 	json: readBooleanArg(args, "json"),
 	verbose: readBooleanArg(args, "verbose")
 })
@@ -303,6 +314,12 @@ const getHeartbeatBucket = ({
 
 const formatErrorMessage = (error: unknown): string =>
 	error instanceof Error ? error.message : String(error)
+
+const unavailableCapabilityDiagnosticFromError = (error: unknown): BridgeCapabilityDiagnostic => ({
+	available: false,
+	reason: formatErrorMessage(error),
+	status: "blocked"
+})
 
 const TRANSIENT_CLAIM_UNAVAILABLE_ERROR_PATTERNS = [
 	/Did not find any (deposit|withdrawal) to finalize/i,
@@ -935,7 +952,10 @@ const runInspectDepositStep = async (context: BridgeRunnerContext): Promise<Runn
 						account: session.account,
 						method: "canCancelDeposit"
 					})
-			})
+			}).catch((error) => ({
+				session: getRecordedSessionFromError(error) ?? session,
+				value: unavailableCapabilityDiagnosticFromError(error)
+			}))
 		])
 		session = mergeVerboseDiagnosticsFromSessions({
 			session,
@@ -1966,6 +1986,7 @@ const createAdapterWithRetries = async ({
 	from,
 	to,
 	verbose,
+	endpointOverrides,
 	log,
 	sleep,
 	retryDelayMs
@@ -1974,6 +1995,7 @@ const createAdapterWithRetries = async ({
 	from: ChainRef
 	to: ChainRef
 	verbose: boolean
+	endpointOverrides?: BridgeEndpointOverrides
 	log: LogFn
 	sleep: (ms: number) => Promise<void>
 	retryDelayMs?: number
@@ -1984,7 +2006,7 @@ const createAdapterWithRetries = async ({
 		maxRetries: DEFAULT_MAX_RETRIES,
 		sleep,
 		shouldRetry: isRetryableInitializationError,
-		run: async () => await createAdapter({ from, to, verbose }),
+		run: async () => await createAdapter({ from, to, verbose, endpointOverrides }),
 		onRetry: ({ error, retryIndex, delayMs }) =>
 			log({
 				event: "retrying",
@@ -1997,6 +2019,77 @@ const createAdapterWithRetries = async ({
 				}
 			})
 	})
+
+const formatCommitSnapshotDetails = (
+	snapshot: BridgeCommitSnapshot
+): Record<string, string | number | null> => {
+	const l1CommitData = snapshot.l1.lastCommit?.data
+
+	return {
+		checkedAt: snapshot.checkedAt,
+		actionsApi: snapshot.actionsApi,
+		bridgeCurrentSlot: snapshot.slotStatus.currentSlot,
+		bridgeWithdrawalDelaySlots: snapshot.slotStatus.withdrawalDelay,
+		bridgeDepositCommitPastSlot: snapshot.slotStatus.depositCommitPastSlot,
+		l1Archive: snapshot.l1.archiveUrl,
+		l1BridgeContract: snapshot.l1.bridgeContract,
+		l1CanonicalMaxBlockHeight: snapshot.l1.networkState?.canonicalMaxBlockHeight ?? null,
+		l1PendingMaxBlockHeight: snapshot.l1.networkState?.pendingMaxBlockHeight ?? null,
+		l1LastCommitTimestamp:
+			snapshot.l1.lastCommit?.timestampIso ?? snapshot.l1.lastCommit?.timestamp ?? null,
+		l1LastCommitHeight: snapshot.l1.lastCommit?.height ?? null,
+		l1LastCommitChainStatus: snapshot.l1.lastCommit?.chainStatus ?? null,
+		l1LastCommitDistanceFromMaxBlockHeight:
+			snapshot.l1.lastCommit?.distanceFromMaxBlockHeight ?? null,
+		l1LastCommitHash: snapshot.l1.lastCommit?.transactionHash ?? null,
+		l1LastCommitSynchronizedOuterActionStateLength: l1CommitData?.[5] ?? null,
+		l1LastCommitSlotRangeLower: l1CommitData?.[6] ?? null,
+		l1LastCommitSlotRangeUpper: l1CommitData?.[7] ?? null,
+		sequencerPk: snapshot.sequencer.sequencerPk,
+		sequencerLive: snapshot.sequencer.liveUrl,
+		sequencerArchive: snapshot.sequencer.archiveUrl,
+		sequencerBridgeContract: snapshot.sequencer.bridgeContract,
+		sequencerCanonicalMaxBlockHeight:
+			snapshot.sequencer.networkState?.canonicalMaxBlockHeight ?? null,
+		sequencerPendingMaxBlockHeight: snapshot.sequencer.networkState?.pendingMaxBlockHeight ?? null,
+		sequencerLastCommitTimestamp:
+			snapshot.sequencer.lastCommit?.timestampIso ??
+			snapshot.sequencer.lastCommit?.timestamp ??
+			null,
+		sequencerLastCommitHeight: snapshot.sequencer.lastCommit?.height ?? null,
+		sequencerLastCommitChainStatus: snapshot.sequencer.lastCommit?.chainStatus ?? null,
+		sequencerLastCommitDistanceFromMaxBlockHeight:
+			snapshot.sequencer.lastCommit?.distanceFromMaxBlockHeight ?? null,
+		sequencerLastCommitHash: snapshot.sequencer.lastCommit?.transactionHash ?? null
+	}
+}
+
+const logBridgeCommitSnapshot = async ({
+	adapter,
+	log
+}: {
+	adapter: Partial<Pick<BridgeAdapter, "getBridgeCommitSnapshot">>
+	log: LogFn
+}): Promise<void> => {
+	if (!adapter.getBridgeCommitSnapshot) return
+
+	try {
+		const snapshot = await adapter.getBridgeCommitSnapshot()
+		await log({
+			event: "bridge-status",
+			phase: "initializing",
+			details: formatCommitSnapshotDetails(snapshot)
+		})
+	} catch (error) {
+		await log({
+			event: "bridge-status-failed",
+			phase: "initializing",
+			details: {
+				message: formatErrorMessage(error)
+			}
+		})
+	}
+}
 
 export const createBridgeCommand = (deps: BridgeCommandDeps = {}): CommandDef<BridgeCommandArgs> =>
 	defineCommand({
@@ -2013,6 +2106,7 @@ export const createBridgeCommand = (deps: BridgeCommandDeps = {}): CommandDef<Br
 			timeoutSlots: { type: "string", required: false, alias: ["timeout-slots"] },
 			pollIntervalMs: { type: "string", required: false, alias: ["poll-interval-ms"] },
 			retryDelayMs: { type: "string", required: false, alias: ["retry-delay-ms"] },
+			...bridgeEndpointOverrideArgs,
 			json: { type: "boolean", default: false },
 			verbose: { type: "boolean", default: false }
 		},
@@ -2033,6 +2127,19 @@ export const createBridgeCommand = (deps: BridgeCommandDeps = {}): CommandDef<Br
 				;(deps.writeProgress ?? console.error)(renderOperationProgress({ event, phase, details }))
 				await logger.write(event, { phase, ...details })
 			}
+			const adapter = await createAdapterWithRetries({
+				createAdapter,
+				from,
+				to,
+				verbose: commandArgs.verbose,
+				endpointOverrides: commandArgs.endpointOverrides,
+				log,
+				sleep,
+				retryDelayMs: commandArgs.retryDelayMs ?? deps.retryDelayMs
+			})
+			if (commandArgs.verbose) {
+				await logBridgeCommitSnapshot({ adapter, log })
+			}
 			const session = await runBridgeOperation(
 				{
 					id,
@@ -2047,15 +2154,7 @@ export const createBridgeCommand = (deps: BridgeCommandDeps = {}): CommandDef<Br
 							: commandArgs.timeoutSlots
 				},
 				{
-					adapter: await createAdapterWithRetries({
-						createAdapter,
-						from,
-						to,
-						verbose: commandArgs.verbose,
-						log,
-						sleep,
-						retryDelayMs: commandArgs.retryDelayMs ?? deps.retryDelayMs
-					}),
+					adapter,
 					sessionStore: {
 						async save(operation) {
 							await store.save({ ...operation, logPath })

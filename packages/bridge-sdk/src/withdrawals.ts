@@ -151,6 +151,7 @@ export async function submitWithdrawal(
 	signTxn: SignTransaction
 ): Promise<string> {
 	setL2(runtime)
+	const fetchBridgeAccount = runtime.bridge?.fetchAccount ?? fetchAccount
 
 	await ensureBridgeTransferAmountCanCoverFees({
 		direction: "withdrawal",
@@ -158,10 +159,14 @@ export async function submitWithdrawal(
 		recipient,
 		accountCreationFee: runtime.l1AccountCreationFee,
 		bridgeProofFee: runtime.bridgeProofFee,
-		recipientAccountExists: async () => (await fetchAccount(runtime.l1Client, recipient)) !== null,
+		recipientAccountExists: async () =>
+			(await fetchBridgeAccount(runtime.l1Client, recipient)) !== null,
 		helperAccountExists: async () =>
-			(await fetchAccount(runtime.l1Client, recipient, TokenId.derive(runtime.outerTokenOwner))) !==
-			null
+			(await fetchBridgeAccount(
+				runtime.l1Client,
+				recipient,
+				TokenId.derive(runtime.outerTokenOwner)
+			)) !== null
 	})
 
 	await refreshCache(recipient)

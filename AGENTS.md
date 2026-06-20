@@ -29,6 +29,13 @@ To install everything, run `pnpm i` from the root.
 - You can disable moon caching by passing the `-f` flag to any `moon run` command that has cached results.
 - If you need to run a command not specified in `moon.yml`, use `pnpm exec <command>`.
 
+## Local wallet files
+
+- Keep local bridge wallet secrets out of regular `.env` files.
+- Store each local wallet in a repo-root `.env.wallet.${name}` file with `PUBLIC_KEY` and `MINA_PRIVATE_KEY`.
+- Load the chosen wallet file explicitly before running Bridge CLI commands. The CLI uses `MINA_PRIVATE_KEY` directly; do not add wallet-file loading logic unless env-file loading no longer works.
+- Keep `.env.wallet.*` and `.env.backup` git-ignored.
+
 ## Linear and PRs
 
 - For this `zeko-ui` repository, create Linear issues in the `Web` team by default. Use the `ZK` team for the separate `zeko` repository or for work that is explicitly owned by Zeko-core rather than this UI monorepo.
@@ -57,6 +64,14 @@ Never try to skip tests or make dumb assertions just to make test pass.
 If a test is failing, take your time to investigate why it is failing without jumping to conclusions.
 Handle failures one by one, methodologically, and make sure that the tests are sound, and that they verify the intended behavior.
 When testing, prefer using the test tool to run the tests.
+
+## Bridge Finality and Latency
+
+- Bridge operation latency is an operational contract. Do not change Bridge CLI, Bridge SDK, Actions API, or indexer semantics that decide whether pending indexed bridge actions are visible to finalization code without explicit operator sign-off.
+- Bridge finalization may use pending chain inclusion when the protocol can construct the witness from pending indexed actions. Do not make canonical finality the default success gate just because finality metadata is available.
+- Preserve finality metadata for dashboards and diagnostics, but do not hide pending rows from finalization-oriented query surfaces unless a task explicitly requires the latency change and tests prove it.
+- For Actions API, Bridge SDK, or Bridge CLI changes that touch finalization, tests must cover pending rows and canonical rows separately.
+- Bridge validation evidence must distinguish chain visibility, pending inclusion, and canonical finality. When asked to prove bridge health, prove fresh deposits and fresh withdrawals with the high-level Bridge CLI, not only queue clearing or status reads.
 
 ## Language Instructions
 

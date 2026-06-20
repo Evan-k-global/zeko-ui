@@ -70,3 +70,11 @@ tasks:
       runInCI: false
     inputs:
       - "@group(src)"
+  create-wallet-env:
+    description: Create a timestamped root .env.wallet file for isolated live bridge validation.
+    command: node ./scripts/create-wallet-env.ts --root ../..
+    options:
+      cache: false
+      runInCI: false
+    inputs:
+      - scripts/create-wallet-env.ts

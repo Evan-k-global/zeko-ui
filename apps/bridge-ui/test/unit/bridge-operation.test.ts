@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { assign, createActor, fromPromise, setup, waitFor } from "xstate"
-import { toUserFriendlyMessage } from "../../app/errors"
+import { QuietError, toUserFriendlyMessage } from "../../app/errors"
 import { bridgeOperationMachine } from "../../machines/bridgeOperation"
 
 const unsignedTransaction = ({ fee, user }: { fee: number; user: string }) =>
@@ -15,7 +15,7 @@ vi.mock("../../app/service-worker/notificationList", () => ({
 }))
 
 const firstWithdrawalTooSmallMessage =
-	"First Zeko->Mina withdrawal amount is too small: recipient B62test does not have an L1 helper account yet, so the first withdrawal must be at least 1 MINA to cover the Mina account creation fee. This withdrawal is 0.2 MINA and cannot proceed as submitted."
+	"First Zeko->Mina withdrawal amount is too small: recipient B62test requires 0.2 MINA bridge fees, 1 MINA helper account creation, and 1 MINA recipient account creation on Mina, so the transfer amount must be at least 2.2 MINA."
 
 const createBridgeActor = (
 	worker: object = {},
@@ -118,7 +118,7 @@ describe("bridgeOperationMachine", () => {
 		vi.unstubAllGlobals()
 	})
 
-	it("stores the early withdrawal threshold SDK error from submitWithdrawal", async () => {
+	it("stores and clears the early withdrawal threshold SDK error from submitWithdrawal", async () => {
 		const bridge = createBridgeActor()
 		const wallet = createWalletActor("zeko:testnet")
 		bridge.start()
@@ -152,7 +152,7 @@ describe("bridgeOperationMachine", () => {
 		const error = actor.getSnapshot().context.errors.at(-1)
 
 		expect(error?.message).toBe(firstWithdrawalTooSmallMessage)
-		expect(toUserFriendlyMessage(error)).toContain("required Mina helper account")
+		expect(toUserFriendlyMessage(error)).toContain("at least 2.2 MINA")
 		expect(
 			bridge.getSnapshot().context.events.some((event) => event.type === "TerminateOperation")
 		).toBe(true)
@@ -724,7 +724,7 @@ describe("bridgeOperationMachine", () => {
 		const user = "B62test"
 		const signedCommand = {
 			accountUpdates: [],
-			feePayer: { authorization: "", body: { fee: "1000000000", publicKey: user } },
+			feePayer: { authorization: "", body: { fee: "100000000", publicKey: user } },
 			memo: ""
 		}
 		vi.stubGlobal("mina", {
@@ -739,7 +739,7 @@ describe("bridgeOperationMachine", () => {
 			expect(input).not.toHaveProperty("wallet")
 			return {
 				requestId: "request-finalize-deposit",
-				transaction: unsignedTransaction({ fee: 1000000000, user })
+				transaction: unsignedTransaction({ fee: 100000000, user })
 			}
 		})
 		const bridge = createBridgeActor({
@@ -773,7 +773,7 @@ describe("bridgeOperationMachine", () => {
 			l1: "mina:devnet",
 			l2: "zeko-m:testnet",
 			user,
-			feeNanomina: 1 * 10e8
+			feeNanomina: 100_000_000
 		})
 
 		actor.stop()
@@ -971,5 +971,199 @@ describe("bridgeOperationMachine", () => {
 		bridge.stop()
 		wallet.stop()
 		vi.useRealTimers()
+	})
+
+	it("fails visibly after a deposit claim backend error instead of returning to claim", async () => {
+		const claimError = new Error("Debug scenario: claim failed")
+		const bridge = createBridgeActor()
+		const wallet = createWalletActor("zeko:testnet")
+		bridge.start()
+		wallet.start()
+
+		const actor = createActor(
+			bridgeOperationMachine.provide({
+				actors: {
+					transactionMachine: fromPromise(async () => {
+						throw claimError
+					})
+				}
+			}),
+			{
+				input: {
+					bridge: bridge as never,
+					wallet: wallet as never,
+					source: "mina:devnet",
+					destination: "zeko-m:testnet",
+					direction: "deposit",
+					amount: "4",
+					actionIndex: 0
+				}
+			}
+		)
+
+		actor.start()
+		actor.send({ type: "Resume", paused: false })
+		actor.send({ type: "CanFinalize", index: 0 })
+		actor.send({ type: "Finalize" })
+
+		await waitFor(actor, (snapshot) => snapshot.matches("FAILED"))
+
+		expect(actor.getSnapshot().context.errors.at(-1)).toBe(claimError)
+		expect(
+			bridge.getSnapshot().context.events.some((event) => event.type === "TerminateOperation")
+		).toBe(false)
+
+		actor.stop()
+		bridge.stop()
+		wallet.stop()
+	})
+
+	it("keeps a deposit claim wallet rejection retryable", async () => {
+		const walletRejection = new QuietError("User rejected the request")
+		const bridge = createBridgeActor()
+		const wallet = createWalletActor("zeko:testnet")
+		bridge.start()
+		wallet.start()
+
+		const actor = createActor(
+			bridgeOperationMachine.provide({
+				actors: {
+					transactionMachine: fromPromise(async () => {
+						throw walletRejection
+					})
+				}
+			}),
+			{
+				input: {
+					bridge: bridge as never,
+					wallet: wallet as never,
+					source: "mina:devnet",
+					destination: "zeko-m:testnet",
+					direction: "deposit",
+					amount: "4",
+					actionIndex: 0
+				}
+			}
+		)
+
+		actor.start()
+		actor.send({ type: "Resume", paused: false })
+		actor.send({ type: "CanFinalize", index: 0 })
+		actor.send({ type: "Finalize" })
+
+		const retryable = await waitFor(
+			actor,
+			(snapshot) =>
+				snapshot.matches("TO_FINALIZE") && snapshot.context.errors.at(-1) === walletRejection
+		)
+
+		expect(retryable.context.errors.at(-1)).toBe(walletRejection)
+		expect(
+			bridge.getSnapshot().context.events.some((event) => event.type === "TerminateOperation")
+		).toBe(false)
+		expect(
+			bridge.getSnapshot().context.events.some((event) => event.type === "CompleteOperation")
+		).toBe(false)
+
+		actor.stop()
+		bridge.stop()
+		wallet.stop()
+	})
+
+	it("fails visibly after a withdrawal claim backend error instead of returning to claim", async () => {
+		const claimError = new Error("Debug scenario: claim failed")
+		const bridge = createBridgeActor()
+		const wallet = createWalletActor("mina:devnet")
+		bridge.start()
+		wallet.start()
+
+		const actor = createActor(
+			bridgeOperationMachine.provide({
+				actors: {
+					transactionMachine: fromPromise(async () => {
+						throw claimError
+					})
+				}
+			}),
+			{
+				input: {
+					bridge: bridge as never,
+					wallet: wallet as never,
+					source: "zeko-m:testnet",
+					destination: "mina:devnet",
+					direction: "withdrawal",
+					amount: "4",
+					actionIndex: 0
+				}
+			}
+		)
+
+		actor.start()
+		actor.send({ type: "Resume", paused: false })
+		actor.send({ type: "CanFinalize", index: 0 })
+		actor.send({ type: "Finalize" })
+
+		await waitFor(actor, (snapshot) => snapshot.matches("FAILED"))
+
+		expect(actor.getSnapshot().context.errors.at(-1)).toBe(claimError)
+		expect(
+			bridge.getSnapshot().context.events.some((event) => event.type === "TerminateOperation")
+		).toBe(false)
+
+		actor.stop()
+		bridge.stop()
+		wallet.stop()
+	})
+
+	it("keeps a withdrawal claim wallet rejection retryable", async () => {
+		const walletRejection = new QuietError("User rejected the request")
+		const bridge = createBridgeActor()
+		const wallet = createWalletActor("mina:devnet")
+		bridge.start()
+		wallet.start()
+
+		const actor = createActor(
+			bridgeOperationMachine.provide({
+				actors: {
+					transactionMachine: fromPromise(async () => {
+						throw walletRejection
+					})
+				}
+			}),
+			{
+				input: {
+					bridge: bridge as never,
+					wallet: wallet as never,
+					source: "zeko-m:testnet",
+					destination: "mina:devnet",
+					direction: "withdrawal",
+					amount: "4",
+					actionIndex: 0
+				}
+			}
+		)
+
+		actor.start()
+		actor.send({ type: "Resume", paused: false })
+		actor.send({ type: "CanFinalize", index: 0 })
+		actor.send({ type: "Finalize" })
+
+		const retryable = await waitFor(
+			actor,
+			(snapshot) =>
+				snapshot.matches("TO_FINALIZE") && snapshot.context.errors.at(-1) === walletRejection
+		)
+
+		expect(retryable.context.errors.at(-1)).toBe(walletRejection)
+		expect(
+			bridge.getSnapshot().context.events.some((event) => event.type === "TerminateOperation")
+		).toBe(false)
+		expect(
+			bridge.getSnapshot().context.events.some((event) => event.type === "CompleteOperation")
+		).toBe(false)
+
+		actor.stop()
+		bridge.stop()
+		wallet.stop()
 	})
 })

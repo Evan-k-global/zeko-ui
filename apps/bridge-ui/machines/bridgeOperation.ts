@@ -13,7 +13,7 @@ import {
 	setup
 } from "xstate"
 import { finalizeNotification } from "../app/service-worker/notificationList"
-import { isTerminalBridgeError } from "../app/errors"
+import { isTerminalBridgeError, QuietError } from "../app/errors"
 import type { BridgeContext, BridgeEvents } from "./bridge"
 import { createLogger } from "./debug"
 import { sendMetric } from "./metrics"
@@ -67,6 +67,9 @@ const addError =
 		logger.error(e)
 		return { errors: [...context.errors, e] }
 	}
+
+const shouldTerminatePreSubmitFailure = (context: BridgeOperationContext): boolean =>
+	context.transaction === undefined && context.actionIndex === undefined
 
 const worker = (bridge: Bridge) => bridge.getSnapshot().context.worker
 
@@ -207,13 +210,6 @@ type BridgeWorker = {
 	direction: Direction
 }
 
-const BRIDGE_FEE_NANOMINA = 1 * 10e8
-
-const initialTransactionFeeNanomina = (key: TransactionKey) =>
-	key === "submitDeposit" || key === "submitWithdrawal"
-		? DEFAULT_TRANSACTION_FEE_NANOMINA
-		: BRIDGE_FEE_NANOMINA
-
 const createSdkSignature = (
 	context: BridgeOperationContext,
 	key: TransactionKey,
@@ -251,7 +247,7 @@ const transactionInput = (
 	key,
 	user: context.user,
 	network: currentNetwork(context),
-	initialFeeNanomina: initialTransactionFeeNanomina(key),
+	initialFeeNanomina: DEFAULT_TRANSACTION_FEE_NANOMINA,
 	createSdkSignature: ({ feeNanomina }) => createSdkSignature(context, key, feeNanomina),
 	completeSdkSignature: ({ requestId, signedTransaction }) =>
 		worker(context.bridge).completeSdkSignature({
@@ -372,6 +368,11 @@ export const bridgeOperationMachine = setup({
 		toFinalizeWithdrawal: ({ context: { returnTo } }) => returnTo === "FINALIZE_WITHDRAWAL",
 		toFinalize: ({ context: { returnTo } }) => returnTo === "TO_FINALIZE",
 		toCancelDeposit: ({ context: { returnTo } }) => returnTo === "CANCEL_DEPOSIT",
+		quietError: ({ event }) =>
+			typeof event === "object" &&
+			event !== null &&
+			"error" in event &&
+			event.error instanceof QuietError,
 		cancellationReady: ({ context }) => context.canCancel === true,
 		cancellationSlotAvailable: ({ context }) => {
 			const activeCancellationOperation =
@@ -710,10 +711,7 @@ export const bridgeOperationMachine = setup({
 						},
 						onError: {
 							target: "#bridgeOperation.FAILED",
-							actions: sendTo(
-								({ context }) => context.bridge,
-								({ self }) => ({ type: "TerminateOperation", id: self.id })
-							)
+							actions: assign(addError(new Error("Failed to submit deposit")))
 						}
 					}
 				},
@@ -847,12 +845,12 @@ export const bridgeOperationMachine = setup({
 						},
 						onError: [
 							{
-								target: "#bridgeOperation.FAILED",
-								guard: ({ context }) => context.errors.length >= 3,
+								target: "#bridgeOperation.TO_FINALIZE",
+								guard: "quietError",
 								actions: assign(addError(new Error("Failed to finalize deposit")))
 							},
 							{
-								target: "#bridgeOperation.FINALIZE_DEPOSIT",
+								target: "#bridgeOperation.FAILED",
 								actions: assign(addError(new Error("Failed to finalize deposit")))
 							}
 						]
@@ -935,13 +933,7 @@ export const bridgeOperationMachine = setup({
 						},
 						onError: {
 							target: "#bridgeOperation.FAILED",
-							actions: [
-								assign(addError(new Error("Failed to submit withdrawal"))),
-								sendTo(
-									({ context }) => context.bridge,
-									({ self }) => ({ type: "TerminateOperation", id: self.id })
-								)
-							]
+							actions: assign(addError(new Error("Failed to submit withdrawal")))
 						}
 					}
 				},
@@ -993,13 +985,7 @@ export const bridgeOperationMachine = setup({
 				},
 				TerminalError: {
 					target: "FAILED",
-					actions: [
-						assign(addError(new Error("Failed to determine withdrawal status"))),
-						sendTo(
-							({ context }) => context.bridge,
-							({ self }) => ({ type: "TerminateOperation", id: self.id })
-						)
-					]
+					actions: assign(addError(new Error("Failed to determine withdrawal status")))
 				}
 			}
 		},
@@ -1025,23 +1011,12 @@ export const bridgeOperationMachine = setup({
 						},
 						onError: [
 							{
-								target: "#bridgeOperation.FAILED",
-								guard: ({ event }) => isTerminalBridgeError(event.error),
-								actions: [
-									assign(addError(new Error("Failed to finalize withdrawal"))),
-									sendTo(
-										({ context }) => context.bridge,
-										({ self }) => ({ type: "TerminateOperation", id: self.id })
-									)
-								]
-							},
-							{
-								target: "#bridgeOperation.FAILED",
-								guard: ({ context }) => context.errors.length >= 3,
+								target: "#bridgeOperation.TO_FINALIZE",
+								guard: "quietError",
 								actions: assign(addError(new Error("Failed to finalize withdrawal")))
 							},
 							{
-								target: "#bridgeOperation.PENDING_WITHDRAWAL",
+								target: "#bridgeOperation.FAILED",
 								actions: assign(addError(new Error("Failed to finalize withdrawal")))
 							}
 						]
@@ -1101,8 +1076,14 @@ export const bridgeOperationMachine = setup({
 			meta: { step: 4 }
 		},
 		FAILED: {
-			type: "final",
 			entry: [
+				sendTo(
+					({ context }) => context.bridge,
+					({ context }) =>
+						shouldTerminatePreSubmitFailure(context)
+							? { type: "TerminateOperation", id: context.id }
+							: { type: "FailOperation", id: context.id }
+				),
 				sendTo(
 					({ context }) => context.bridge,
 					({ self }) => ({ type: "ReleaseCancellationOperation", id: self.id })

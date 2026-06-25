@@ -13,16 +13,28 @@ describe("bridge UI copy", () => {
 			/const ledgerUnsupportedNetworkLabel = formatBridgeNetworkLabel\( ?ZEKO_M_NETWORKS\.mainnet ?\)/
 		)
 		expect(normalizedInputsSource).toContain(
-			"Note: Ledger hardware wallets are not yet supported by {{ ledgerUnsupportedNetworkLabel }}."
+			"Ledger hardware wallets are not yet supported by {{ ledgerUnsupportedNetworkLabel }}."
 		)
+		expect(inputsSource).not.toContain('<ol class="BridgeSteps">')
+		expect(inputsSource).toContain("Send from origin")
+		expect(inputsSource).toContain("claim on destination")
+		expect(inputsSource).toContain("<BridgeFeeNotice")
+		expect(inputsSource).toContain(':fees="selectedFeeDisclosure"')
 		expect(inputsSource).not.toContain(networkLabel)
-		expect(normalizedInputsSource.indexOf("Claim to the destination chain.")).toBeLessThan(
-			normalizedInputsSource.indexOf("Note: Ledger hardware wallets")
+		expect(normalizedInputsSource.indexOf("claim on destination")).toBeLessThan(
+			normalizedInputsSource.indexOf("Ledger hardware wallets")
+		)
+		expect(normalizedInputsSource.indexOf("Ledger hardware wallets")).toBeLessThan(
+			normalizedInputsSource.indexOf("<BridgeFeeNotice")
 		)
 	})
 
 	it("groups the change-network prompt with its target network label", () => {
 		expect(currentOperationSource).toContain('class="NetworkPrompt"')
 		expect(currentOperationSource).toContain('class="NetworkPromptText"')
+	})
+
+	it("does not keep TypeScript helper files in the components directory", () => {
+		expect(import.meta.glob("../../app/components/*.ts")).toEqual({})
 	})
 })

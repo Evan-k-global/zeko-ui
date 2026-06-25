@@ -2,16 +2,20 @@
 import { Field } from "@ark-ui/vue/field"
 import { createListCollection, Select } from "@ark-ui/vue/select"
 import { ChevronDownIcon } from "lucide-vue-next"
+import type { BridgeAmountInput } from "~/utils/bridgeInputs"
 
-const { loading = false } = defineProps<{ loading?: boolean }>()
-const modelValue = defineModel({ required: true })
+const { loading = false, invalid = false } = defineProps<{
+	loading?: boolean
+	invalid?: boolean
+}>()
+const modelValue = defineModel<BridgeAmountInput>({ required: true })
 const collection = createListCollection({
 	items: ["MINA", "ZEKO"] as const
 })
 </script>
 
 <template>
-  <div class="SelectWrapper">
+  <div :class="{ SelectWrapper: true, isInvalid: invalid }">
     <Field.Root>
       <LoadingInput v-if="loading" />
       <Field.Input
@@ -22,6 +26,7 @@ const collection = createListCollection({
         v-model="modelValue"
         v-bind="$attrs"
         :disabled="loading"
+        :aria-invalid="invalid"
         :placeholder='loading ? "" : "Enter Amount"'
       />
     </Field.Root>
@@ -74,6 +79,11 @@ const collection = createListCollection({
   border-radius: 8px;
   border: 1px solid var(--palette-gray-200);
   overflow: hidden;
+
+  &.isInvalid {
+    border-color: var(--palette-error-border);
+    background-color: oklch(0.98 0.04 28 / 0.34);
+  }
 }
 
 span,
@@ -92,6 +102,12 @@ input {
   outline: none;
   height: 100%;
   width: 100%;
+}
+
+.SelectWrapper.isInvalid [data-scope="field"][data-part="input"],
+.SelectWrapper.isInvalid [data-scope="select"][data-part="trigger"],
+.SelectWrapper.isInvalid [data-scope="select"][data-part="value-text"] {
+  color: var(--palette-error-content);
 }
 
 /* Select container */

@@ -344,8 +344,88 @@ describe("mock bridge operations worker", () => {
 	it("exposes only debug backend scenarios that are known to work", async () => {
 		expect(bridgeDebugBackendScenarios).toEqual([
 			"happy-path",
+			"repro-first-withdrawal-too-small",
+			"repro-claim-failure",
 			"repro-unindexed-withdrawal-completion"
 		])
+	})
+
+	it("can reproduce the first withdrawal threshold backend error", async () => {
+		const store = createBridgeDebugBackendStore({ storage })
+		store.setScenario("repro-first-withdrawal-too-small")
+		const worker = createMockBridgeOperationsWorker({ store })
+
+		store.seedRecoveredOperation("withdrawal", { amount: "0.2" })
+
+		await expect(
+			worker.canFinalizeWithdrawal({
+				user: "B62qtest-user",
+				l1: "mina:devnet",
+				l2: "zeko-m:testnet"
+			})
+		).rejects.toThrow(/0\.2 MINA bridge fees.*1 MINA helper.*1 MINA recipient.*2\.2 MINA/)
+	})
+
+	it("does not invent a first withdrawal threshold error for valid amounts", async () => {
+		const store = createBridgeDebugBackendStore({ storage })
+		store.setScenario("repro-first-withdrawal-too-small")
+		const worker = createMockBridgeOperationsWorker({ store })
+
+		store.seedRecoveredOperation("withdrawal", { amount: "2.2" })
+
+		await expect(
+			worker.canFinalizeWithdrawal({
+				user: "B62qtest-user",
+				l1: "mina:devnet",
+				l2: "zeko-m:testnet"
+			})
+		).resolves.toEqual({
+			available: true,
+			reason: null,
+			status: "available",
+			index: 1
+		})
+	})
+
+	it("can reproduce a route-neutral claim backend failure without frontend shortcuts", async () => {
+		const store = createBridgeDebugBackendStore({ storage })
+		store.setScenario("repro-claim-failure")
+		const worker = createMockBridgeOperationsWorker({ store })
+		const user = "B62qtest-user"
+
+		store.seedRecoveredOperation("withdrawal", { amount: "4" })
+
+		const finalize = await worker.finalizeWithdrawal({
+			l1: "mina:devnet",
+			l2: "zeko-m:testnet",
+			user,
+			feeNanomina: 100_000_000
+		})
+
+		await expect(
+			worker.completeSdkSignature({
+				requestId: finalize.requestId,
+				signedTransaction: signedCommand(user)
+			})
+		).rejects.toThrow("Debug scenario: claim failed")
+
+		store.reset()
+		store.setScenario("repro-claim-failure")
+		store.seedRecoveredOperation("deposit", { amount: "4" })
+
+		const finalizeDeposit = await worker.finalizeDeposit({
+			l1: "mina:devnet",
+			l2: "zeko-m:testnet",
+			user,
+			feeNanomina: 100_000_000
+		})
+
+		await expect(
+			worker.completeSdkSignature({
+				requestId: finalizeDeposit.requestId,
+				signedTransaction: signedCommand(user)
+			})
+		).rejects.toThrow("Debug scenario: claim failed")
 	})
 
 	it("can reproduce local withdrawal completion before terminal recovery indexing", async () => {

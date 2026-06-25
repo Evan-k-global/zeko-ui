@@ -44,6 +44,16 @@ const createWalletActor = () =>
 		})
 	)
 
+const signedTransactionForUser = (user: string) => ({
+	signedData: JSON.stringify({
+		zkappCommand: {
+			accountUpdates: [],
+			feePayer: { authorization: "", body: { fee: "100000000", publicKey: user } },
+			memo: ""
+		}
+	})
+})
+
 describe("bridge refresh queue sync", () => {
 	it("queues recovered main operations behind an active local operation that is not indexed yet", async () => {
 		vi.stubGlobal("mina", {
@@ -435,6 +445,278 @@ describe("bridge refresh queue sync", () => {
 			lane: "main",
 			status: "started"
 		})
+
+		bridge.stop()
+		wallet.stop()
+	})
+
+	it("can simulate page refresh repeatedly without duplicate recovered actor ids", async () => {
+		const store = getBridgeDebugBackendStore()
+		store.reset()
+		const wallet = createWalletActor()
+		wallet.start()
+		const bridge = createActor(
+			bridgeMachine.provide({
+				actors: {
+					detectWalletChange: fromCallback(() => {})
+				}
+			}),
+			{
+				input: {
+					debugMode: "mock-backend",
+					wallet: wallet as unknown as ActorRefFromLogic<typeof walletMachine>
+				}
+			}
+		)
+		bridge.start()
+
+		bridge.send({ type: "AccountChanged", account: "B62qtest-user" })
+		bridge.send({ type: "NetworkChanged", network: "mina:devnet" })
+		await waitFor(bridge, (snapshot) => snapshot.matches("READY"))
+
+		const seed = store.seedRecoveredOperation("withdrawal")
+		bridge.send({ type: "RefreshOperations" })
+		await waitFor(
+			bridge,
+			(snapshot) => snapshot.context.operations.has(seed.id) && snapshot.matches("READY")
+		)
+
+		bridge.send({ type: "SimulatePageRefresh" })
+		await waitFor(
+			bridge,
+			(snapshot) => snapshot.context.operations.has(seed.id) && snapshot.matches("READY")
+		)
+		bridge.send({ type: "SimulatePageRefresh" })
+		const refreshed = await waitFor(
+			bridge,
+			(snapshot) => snapshot.context.operations.has(seed.id) && snapshot.matches("READY")
+		)
+
+		expect(refreshed.context.operations.get(seed.id)).toMatchObject({
+			lane: "main",
+			status: "started"
+		})
+
+		bridge.stop()
+		wallet.stop()
+	})
+
+	it("removes a pre-submit wallet rejection from the active main operation", async () => {
+		vi.stubGlobal("mina", {
+			sendTransaction: vi.fn(async () => new Error("User rejected the request"))
+		})
+		const store = getBridgeDebugBackendStore()
+		store.reset()
+		const wallet = createWalletActor()
+		wallet.start()
+		const bridge = createActor(
+			bridgeMachine.provide({
+				actors: {
+					detectWalletChange: fromCallback(() => {})
+				}
+			}),
+			{
+				input: {
+					debugMode: "mock-backend",
+					wallet: wallet as unknown as ActorRefFromLogic<typeof walletMachine>
+				}
+			}
+		)
+		bridge.start()
+
+		bridge.send({ type: "AccountChanged", account: "B62qtest-user" })
+		bridge.send({ type: "NetworkChanged", network: "mina:devnet" })
+		await waitFor(bridge, (snapshot) => snapshot.matches("READY"))
+
+		bridge.send({ type: "StartOperation", amount: "2" })
+		const released = await waitFor(
+			bridge,
+			(snapshot) =>
+				snapshot.context.activeOperation === null && snapshot.context.operations.size === 0
+		)
+
+		expect(released.context.activeOperation).toBeNull()
+		expect(released.context.operations.size).toBe(0)
+
+		bridge.stop()
+		wallet.stop()
+	})
+
+	it("removes a pre-submit non-wallet failure from the active main operation", async () => {
+		vi.stubGlobal("mina", {
+			sendTransaction: vi.fn(async () => {
+				throw new Error("Error invoking post: Method not found")
+			})
+		})
+		const store = getBridgeDebugBackendStore()
+		store.reset()
+		const wallet = createWalletActor()
+		wallet.start()
+		const bridge = createActor(
+			bridgeMachine.provide({
+				actors: {
+					detectWalletChange: fromCallback(() => {})
+				}
+			}),
+			{
+				input: {
+					debugMode: "mock-backend",
+					wallet: wallet as unknown as ActorRefFromLogic<typeof walletMachine>
+				}
+			}
+		)
+		bridge.start()
+
+		bridge.send({ type: "AccountChanged", account: "B62qtest-user" })
+		bridge.send({ type: "NetworkChanged", network: "mina:devnet" })
+		await waitFor(bridge, (snapshot) => snapshot.matches("READY"))
+
+		bridge.send({ type: "StartOperation", amount: "2" })
+		const completed = await waitFor(bridge, (snapshot) => {
+			if (snapshot.context.activeOperation === null && snapshot.context.operations.size === 0) {
+				return true
+			}
+			const activeOperation = snapshot.context.activeOperation
+				? snapshot.context.operations.get(snapshot.context.activeOperation)
+				: null
+			return activeOperation?.operation.getSnapshot().matches("FAILED") === true
+		})
+
+		expect(completed.context.activeOperation).toBeNull()
+		expect(completed.context.operations.size).toBe(0)
+
+		bridge.stop()
+		wallet.stop()
+	})
+
+	it("releases a post-submit claim failure from the active main operation", async () => {
+		const user = "B62qtest-user"
+		vi.stubGlobal("mina", {
+			sendTransaction: vi.fn(async () => signedTransactionForUser(user))
+		})
+		const store = getBridgeDebugBackendStore()
+		store.reset()
+		store.setScenario("repro-claim-failure")
+		const wallet = createWalletActor()
+		wallet.start()
+		const bridge = createActor(
+			bridgeMachine.provide({
+				actors: {
+					detectWalletChange: fromCallback(() => {})
+				}
+			}),
+			{
+				input: {
+					debugMode: "mock-backend",
+					wallet: wallet as unknown as ActorRefFromLogic<typeof walletMachine>
+				}
+			}
+		)
+		bridge.start()
+
+		bridge.send({ type: "AccountChanged", account: user })
+		bridge.send({ type: "NetworkChanged", network: "mina:devnet" })
+		await waitFor(bridge, (snapshot) => snapshot.matches("READY"))
+
+		const seed = store.seedRecoveredOperation("withdrawal")
+		bridge.send({ type: "RefreshOperations" })
+		const recovered = await waitFor(
+			bridge,
+			(snapshot) => snapshot.context.activeOperation === seed.id && snapshot.matches("READY")
+		)
+		const operation = recovered.context.operations.get(seed.id)?.operation
+		if (!operation) throw new Error("Expected recovered operation actor")
+
+		await waitFor(operation, (snapshot) => snapshot.matches("TO_FINALIZE"))
+		operation.send({ type: "Finalize" })
+		await waitFor(operation, (snapshot) => snapshot.matches("FAILED"))
+		const released = await waitFor(
+			bridge,
+			(snapshot) =>
+				snapshot.context.activeOperation === null &&
+				snapshot.context.operations.has(seed.id) &&
+				snapshot.context.operations.get(seed.id)?.status === "completed" &&
+				snapshot.context.operations.get(seed.id)?.operation.getSnapshot().matches("FAILED") === true
+		)
+
+		expect(released.context.activeOperation).toBeNull()
+		expect(released.context.operations.get(seed.id)).toMatchObject({
+			lane: "main",
+			status: "completed"
+		})
+
+		bridge.stop()
+		wallet.stop()
+	})
+
+	it("reconciles a failed recovered claim when a terminal refresh arrives", async () => {
+		const user = "B62qtest-user"
+		vi.stubGlobal("mina", {
+			sendTransaction: vi.fn(async () => signedTransactionForUser(user))
+		})
+		const store = getBridgeDebugBackendStore()
+		store.reset()
+		store.setScenario("repro-claim-failure")
+		const wallet = createWalletActor()
+		wallet.start()
+		const bridge = createActor(
+			bridgeMachine.provide({
+				actors: {
+					detectWalletChange: fromCallback(() => {})
+				}
+			}),
+			{
+				input: {
+					debugMode: "mock-backend",
+					wallet: wallet as unknown as ActorRefFromLogic<typeof walletMachine>
+				}
+			}
+		)
+		bridge.start()
+
+		bridge.send({ type: "AccountChanged", account: user })
+		bridge.send({ type: "NetworkChanged", network: "mina:devnet" })
+		await waitFor(bridge, (snapshot) => snapshot.matches("READY"))
+
+		const seed = store.seedRecoveredOperation("withdrawal")
+		bridge.send({ type: "RefreshOperations" })
+		const recovered = await waitFor(
+			bridge,
+			(snapshot) => snapshot.context.activeOperation === seed.id && snapshot.matches("READY")
+		)
+		const operation = recovered.context.operations.get(seed.id)?.operation
+		if (!operation) throw new Error("Expected recovered operation actor")
+
+		await waitFor(operation, (snapshot) => snapshot.matches("TO_FINALIZE"))
+		operation.send({ type: "Finalize" })
+		await waitFor(operation, (snapshot) => snapshot.matches("FAILED"))
+		await waitFor(bridge, (snapshot) => snapshot.context.activeOperation === null)
+
+		store.update((current) => ({
+			...current,
+			seededOperations: current.seededOperations.map((operation) =>
+				operation.id === seed.id ? { ...operation, finalised: true } : operation
+			)
+		}))
+
+		const refreshCount = store.getSnapshot().findPendingOperationsCount
+		bridge.send({ type: "RefreshOperations" })
+		await waitFor(
+			bridge,
+			(snapshot) =>
+				store.getSnapshot().findPendingOperationsCount > refreshCount && snapshot.matches("READY")
+		)
+		const refreshedOperation = await waitFor(
+			operation,
+			(snapshot) => snapshot.context.completionVerification === "verified"
+		)
+
+		const refreshed = bridge.getSnapshot()
+
+		expect(refreshedOperation.matches("FAILED")).toBe(false)
+		expect(refreshedOperation.matches("BRIDGE_OPERATION_DONE_NOOP")).toBe(true)
+		expect(refreshedOperation.context.completionVerification).toBe("verified")
+		expect(refreshed.context.activeOperation).toBeNull()
 
 		bridge.stop()
 		wallet.stop()

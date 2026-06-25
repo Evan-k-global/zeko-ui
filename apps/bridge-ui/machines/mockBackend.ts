@@ -5,6 +5,8 @@ export const BRIDGE_DEBUG_BACKEND_STORAGE_KEY = "bridgeDebugBackendState"
 
 export const bridgeDebugBackendScenarios = [
 	"happy-path",
+	"repro-first-withdrawal-too-small",
+	"repro-claim-failure",
 	"repro-unindexed-withdrawal-completion"
 ] as const
 
@@ -188,6 +190,16 @@ const debugErrorMessage = (error: BridgeDebugForcedError) =>
 		terminal: "Debug scenario: terminal backend error",
 		transient: "Debug scenario: transient worker error"
 	})[error]
+
+const firstWithdrawalTooSmallMessage = (recipient: string) =>
+	`First Zeko->Mina withdrawal amount is too small: recipient ${recipient} requires 0.2 MINA bridge fees, 1 MINA helper account creation, and 1 MINA recipient account creation on Mina, so the transfer amount must be at least 2.2 MINA.`
+
+const firstWithdrawalTooSmallMinimumMina = 2.2
+
+const amountIsBelowFirstWithdrawalMinimum = (amount: string): boolean => {
+	const amountMina = Number(amount)
+	return Number.isFinite(amountMina) && amountMina < firstWithdrawalTooSmallMinimumMina
+}
 
 const currentTimestampMs = () => Date.now()
 
@@ -637,6 +649,13 @@ export const createMockBridgeOperationsWorker = ({
 					(seed) =>
 						seed.kind === "withdrawal" && seed.cancelled === false && seed.finalised === false
 				)
+				if (
+					snapshot.scenario === "repro-first-withdrawal-too-small" &&
+					firstPendingWithdrawal &&
+					amountIsBelowFirstWithdrawalMinimum(firstPendingWithdrawal.amount)
+				) {
+					throw new Error(firstWithdrawalTooSmallMessage(input.user))
+				}
 				return firstPendingWithdrawal
 					? {
 							available: true,
@@ -661,6 +680,13 @@ export const createMockBridgeOperationsWorker = ({
 				)
 				if (!signatureRequest) {
 					throw new Error(`No debug SDK signature request found for ${input.requestId}`)
+				}
+				if (
+					snapshot.scenario === "repro-claim-failure" &&
+					(signatureRequest.action === "finalizeDeposit" ||
+						signatureRequest.action === "finalizeWithdrawal")
+				) {
+					throw new Error("Debug scenario: claim failed")
 				}
 				const hash = fakeHash(snapshot.nextHashId)
 				store.update((current) => ({

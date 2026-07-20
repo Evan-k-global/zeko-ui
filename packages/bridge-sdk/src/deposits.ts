@@ -18,7 +18,7 @@ import {
 } from "o1js"
 import { Actions, Events, fromList } from "./actions"
 import { ensureBridgeTransferAmountCanCoverFees } from "./errors"
-import { fetchAccount, fetchCurrentSlot, setL1, setL2 } from "./network"
+import { fetchAccount, setL1, setL2 } from "./network"
 import { pollProvingResult } from "./prover"
 import { debug, type BridgeRuntime } from "./runtime"
 import {
@@ -41,7 +41,6 @@ import {
 	checkAccepted,
 	depositAux,
 	fetchActions,
-	fetchCommitAsePastSlot,
 	fetchOuterActionsFromIndexer,
 	fetchOuterWitnessesFromAuxes,
 	filterNulls,
@@ -60,6 +59,19 @@ export type DepositParams = {
 }
 
 const NO_OUTER_COMMIT_REASON = "No outer commit available yet"
+
+const publicKeyToBase58 = (label: string, publicKey: PublicKey): string => {
+	try {
+		return publicKey.toBase58()
+	} catch {
+		throw new Error(
+			`${label} cannot be encoded as a Mina public key (fields: ${publicKey
+				.toFields()
+				.map((field) => field.toString())
+				.join(", ")})`
+		)
+	}
+}
 
 export type DepositStateContext = {
 	helperAccountL1: Account | null
@@ -159,7 +171,7 @@ export async function fetchDepositStateContext(
 		await (runtime.bridge?.fetchUserDeposits?.(pk) ?? fetchUserDeposits(runtime, pk))
 	).map((deposit) => ({
 		deposit,
-		aux: depositAux(deposit)
+		aux: (runtime.bridge?.depositAux ?? depositAux)(deposit)
 	}))
 
 	const depositsByAux = new Map<bigint, DepositParams>()
@@ -176,32 +188,24 @@ export async function fetchDepositStateContext(
 					deposits.map(({ aux }) => aux.toString())
 				)
 
-	const [helperAccountL1, helperAccountL2, syncedOuterActionState, currentSlot] = await Promise.all(
-		[
-			(runtime.bridge?.fetchAccount ?? fetchAccount)(
-				runtime.l1Client,
-				pk,
-				TokenId.derive(runtime.outerTokenOwner)
-			),
-			(runtime.bridge?.fetchAccount ?? fetchAccount)(
-				runtime.l2Client,
-				pk,
-				TokenId.derive(runtime.innerHolder)
-			),
-			runtime.bridge?.fetchSyncedOuterActionState?.() ?? fetchSyncedOuterActionState(runtime),
-			runtime.bridge?.fetchCurrentSlot?.() ?? fetchCurrentSlot(runtime)
-		]
-	)
+	const [helperAccountL1, helperAccountL2, syncedOuterActionState] = await Promise.all([
+		(runtime.bridge?.fetchAccount ?? fetchAccount)(
+			runtime.l1Client,
+			pk,
+			TokenId.derive(runtime.outerTokenOwner)
+		),
+		(runtime.bridge?.fetchAccount ?? fetchAccount)(
+			runtime.l2Client,
+			pk,
+			TokenId.derive(runtime.innerHolder)
+		),
+		runtime.bridge?.fetchSyncedOuterActionState?.() ?? fetchSyncedOuterActionState(runtime)
+	])
 
 	const prevNextCancelledDeposit = helperAccountL1
 		? getNextCancelledDepositIndex(helperAccountL1)
 		: UInt32.zero
 	const prevNextDeposit = helperAccountL2 ? getNextDepositIndex(helperAccountL2) : UInt32.zero
-
-	const { commit: lastCommit, ase } = await fetchCommitAsePastSlot(
-		runtime.actionsApiClient,
-		+currentSlot.sub(runtime.withdrawalDelay)
-	)
 
 	const earliestBeforeState =
 		depositWitnesses.length === 0
@@ -214,6 +218,12 @@ export async function fetchDepositStateContext(
 			: await fetchOuterActionsFromIndexer(runtime.actionsApiClient, {
 					fromState: earliestBeforeState.toString()
 				})
+	const lastCommitIndex = outerActions.reduce(
+		(lastIndex, action, index) => (action.type === "commit" ? index : lastIndex),
+		-1
+	)
+	const lastCommit = lastCommitIndex === -1 ? null : (outerActions[lastCommitIndex] as OuterCommit)
+	const ase = lastCommitIndex === -1 ? [] : outerActions.slice(lastCommitIndex + 1)
 
 	return {
 		helperAccountL1,
@@ -223,8 +233,7 @@ export async function fetchDepositStateContext(
 		syncedOuterActionState,
 		lastCommit,
 		lastCommitAse: ase.map(({ action }) => fromList([action]).hash),
-		lastCommitIndex:
-			lastCommit === null ? -1 : outerActions.findIndex(({ index }) => lastCommit.index === index),
+		lastCommitIndex,
 		commitAseTarget:
 			ase.at(-1)?.afterActionState ?? lastCommit?.afterActionState ?? syncedOuterActionState.state,
 		synchronizedOuterActionStateIndex:
@@ -372,8 +381,6 @@ export async function submitDeposit(
 			isProved: Bool(true),
 			verificationKeyHash: await getVkHash(runtime.outerPk)
 		}
-
-		AccountUpdate.attachToTransaction(actionWitness)
 	})
 
 	const signed = await signTxn(txn)
@@ -590,9 +597,9 @@ export async function finalizeDeposit(
 				finalizeDeposit.body.events = Events.pushEvent(finalizeDeposit.body.events, [
 					Field(witness.checkAccepted.init.depositIndex),
 					Field(0), // empty children
-					...PublicKey.fromBase58(witness.checkAccepted.init.params.holderAccountL1).toFields(),
+					...depositParams.deposit.holderAccountL1.toFields(),
 					...UInt64.from(witness.checkAccepted.init.params.amount).toFields(),
-					...PublicKey.fromBase58(witness.checkAccepted.init.params.recipient).toFields(),
+					...depositParams.deposit.recipient.toFields(),
 					...UInt32.from(witness.checkAccepted.init.params.timeout).toFields()
 				])
 				finalizeDeposit.body.authorizationKind = {
@@ -600,7 +607,6 @@ export async function finalizeDeposit(
 					isProved: Bool(true),
 					verificationKeyHash: await getVkHash(runtime.innerHolder)
 				}
-				AccountUpdate.attachToTransaction(finalizeDeposit)
 			}
 		)
 
@@ -729,6 +735,11 @@ function buildDepositFinalizationWitnessValue(
 	const aseElems = context.outerActions
 		.slice(nextCommitIndex + 1, context.currentSyncedOuterActionStateIndex + 1)
 		.map(({ action }) => fromList([action]).hash)
+	const recipient = publicKeyToBase58("Deposit recipient", depositParams.deposit.recipient)
+	const holderAccountL1 = publicKeyToBase58(
+		"Deposit L1 holder",
+		depositParams.deposit.holderAccountL1
+	)
 
 	return {
 		aseTarget: context.syncedOuterActionState,
@@ -745,8 +756,8 @@ function buildDepositFinalizationWitnessValue(
 					orignalActionState: witness.beforeActionState.toString(),
 					params: {
 						amount: depositParams.deposit.amount.toString(),
-						recipient: depositParams.deposit.recipient.toBase58(),
-						holderAccountL1: depositParams.deposit.holderAccountL1.toBase58(),
+						recipient,
+						holderAccountL1,
 						timeout: +depositParams.deposit.timeout,
 						children: "[]"
 					}

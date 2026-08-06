@@ -478,3 +478,5 @@
 - T492 | done | preserve-rebuild-and-refresh-ordering | done/T492-preserve-rebuild-and-refresh-ordering.md
 - T493 | done | fix-registry-validation-and-refresh | done/T493-fix-registry-validation-and-refresh.md
 - T494 | done | fix-registry-proof-and-proposal-admission | done/T494-fix-registry-proof-and-proposal-admission.md
+- T495 | done | add-sepolia-actions-api-environment-and-cors-policy | done/T495-actions-api-sepolia-environment.md
+- T496 | in-progress | add-northflank-sepolia-indexer-deployment | in-progress/T496-northflank-sepolia-indexer-deployment.md

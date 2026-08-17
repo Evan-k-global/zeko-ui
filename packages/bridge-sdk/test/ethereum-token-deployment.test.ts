@@ -197,6 +197,19 @@ describe("ERC20 mirror token local roundtrip", () => {
 		expect(manifest.finalAdminContractL2).toBe(finalAdminContractKey.toPublicKey().toBase58())
 		expect(manifest.finalAdminAuthorityL2).toBe(PublicKey.empty().toBase58())
 		expect(refreshCache).toHaveBeenCalledWith(ownerKey.toPublicKey(), tokenId)
+		expect(
+			refreshCache.mock.calls.filter(
+				([publicKey, token]) => publicKey === feePayer && token === undefined
+			)
+		).toHaveLength(4)
+		expect(
+			refreshCache.mock.calls.filter(
+				([publicKey, token]) =>
+					publicKey instanceof PublicKey &&
+					publicKey.equals(adminAuthorityKey.toPublicKey()).toBoolean() &&
+					token === undefined
+			)
+		).toHaveLength(2)
 		refreshCache.mockRestore()
 		expect(Mina.getBalance(vaultKey.toPublicKey(), tokenId).toBigInt()).toBe(1_000n)
 		expect(

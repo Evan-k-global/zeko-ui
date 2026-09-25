@@ -485,3 +485,6 @@
 - T499 | done | fix-actions-dashboard-node-typecheck | done/T499-fix-actions-dashboard-node-types.md
 - T500 | done | skip-unavailable-mainnet-skill-link | done/T500-skip-unavailable-mainnet-skill-link.md
 - T501 | done | increase-actions-dashboard-control-timeout | done/T501-increase-actions-dashboard-control-timeout.md
+- T502 | done | ethereum-product-documentation | done/T502-ethereum-product-documentation.md
+- T503 | done | ethereum-facing-app-copy | done/T503-ethereum-facing-app-copy.md
+- T504 | done | correct-ethereum-guide-links | done/T504-correct-ethereum-guide-links.md

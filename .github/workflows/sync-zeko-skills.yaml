@@ -22,7 +22,7 @@ jobs:
 
   validate-public-install:
     needs: sync
-    runs-on: warp-ubuntu-latest-x64-2x
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
@@ -45,7 +45,7 @@ jobs:
   publish-clawhub:
     if: github.event_name == 'push'
     needs: validate-public-install
-    runs-on: warp-ubuntu-latest-x64-2x
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:

@@ -9,7 +9,7 @@ on:
 
 jobs:
   github-release:
-    runs-on: warp-ubuntu-latest-x64-2x
+    runs-on: ubuntu-latest
     name: Create GitHub Release
     steps:
       - uses: actions/checkout@v4

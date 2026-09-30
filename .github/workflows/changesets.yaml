@@ -15,7 +15,7 @@ permissions:
 jobs:
   release:
     name: Changesets
-    runs-on: warp-ubuntu-latest-x64-4x
+    runs-on: ubuntu-latest
     outputs:
       hasChangesets: ${{ steps.changesets.outputs.hasChangesets }}
     steps:

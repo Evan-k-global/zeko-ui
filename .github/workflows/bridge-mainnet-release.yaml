@@ -14,7 +14,7 @@ permissions:
 jobs:
   release-mainnet:
     name: Release Mainnet
-    runs-on: warp-ubuntu-latest-x64-8x
+    runs-on: ubuntu-latest
     environment: mainnet
     concurrency:
       group: bridge-mainnet-release
